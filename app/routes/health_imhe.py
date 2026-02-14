@@ -7,6 +7,11 @@ from app.controllers.health_imhe_controller import (
     get_imhe_ages,
     get_imhe_sexes,
     get_imhe_causes,
+    get_imhe_measures,
+    get_imhe_metrics,
+    get_imhe_value_percentiles,
+    get_imhe_value_percentiles_dense,
+    get_imhe_trend,
 )
 from app.schemas.health_imhe_schema import (
     IMHEListResponse,
@@ -15,6 +20,10 @@ from app.schemas.health_imhe_schema import (
     IMHEAgeItem,
     IMHESexItem,
     IMHECauseItem,
+    IMHEMeasureItem,
+    IMHEMetricItem,
+    IMHEValuePercentiles,
+    IMHEYearValueItem,
 )
 
 router = APIRouter(prefix="/health/imhe", tags=["health-imhe"])
@@ -181,3 +190,97 @@ def imhe_causes(
         "location_name": location_name,
     }
     return get_imhe_causes(filters)
+
+
+@router.get("/measures", response_model=list[IMHEMeasureItem])
+def imhe_measures(
+    year: int | None = Query(default=None),
+    cause_name: str | None = Query(default=None),
+    age_name: str | None = Query(default=None),
+    sex_name: str | None = Query(default=None),
+    location_name: str | None = Query(default=None),
+):
+    filters = {
+        "exclude_age_names": EXCLUDED_AGE_NAMES,
+        "year": year,
+        "cause_name": cause_name,
+        "age_name": age_name,
+        "sex_name": sex_name,
+        "location_name": location_name,
+    }
+    return get_imhe_measures(filters)
+
+
+@router.get("/metrics", response_model=list[IMHEMetricItem])
+def imhe_metrics(
+    year: int | None = Query(default=None),
+    cause_name: str | None = Query(default=None),
+    age_name: str | None = Query(default=None),
+    sex_name: str | None = Query(default=None),
+    location_name: str | None = Query(default=None),
+):
+    filters = {
+        "exclude_age_names": EXCLUDED_AGE_NAMES,
+        "year": year,
+        "cause_name": cause_name,
+        "age_name": age_name,
+        "sex_name": sex_name,
+        "location_name": location_name,
+    }
+    return get_imhe_metrics(filters)
+
+
+@router.get("/trend", response_model=list[IMHEYearValueItem])
+def imhe_trend(
+    measure_name: str | None = Query(default=None),
+    metric_name: str | None = Query(default=None),
+    cause_name: str | None = Query(default=None),
+    age_name: str | None = Query(default=None),
+    sex_name: str | None = Query(default=None),
+    location_name: str | None = Query(default=None),
+):
+    filters = {
+        "exclude_age_names": EXCLUDED_AGE_NAMES,
+        "measure_name": measure_name,
+        "metric_name": metric_name,
+        "cause_name": cause_name,
+        "age_name": age_name,
+        "sex_name": sex_name,
+        "location_name": location_name,
+    }
+    return get_imhe_trend(filters)
+
+
+@router.get("/percentiles", response_model=IMHEValuePercentiles)
+def imhe_percentiles(
+    p: list[float] = Query(default=[0.05, 0.95]),
+    dense_years: bool = Query(default=True),
+    min_countries: int = Query(default=150, ge=1),
+    year_from: int | None = Query(default=None),
+    year_to: int | None = Query(default=None),
+    measure_name: str | None = Query(default=None),
+    metric_name: str | None = Query(default=None),
+    cause_name: str | None = Query(default=None),
+    age_name: str | None = Query(default=None),
+    sex_name: str | None = Query(default=None),
+    location_name: str | None = Query(default=None),
+):
+    filters = {
+        "exclude_age_names": EXCLUDED_AGE_NAMES,
+        "measure_name": measure_name,
+        "metric_name": metric_name,
+        "cause_name": cause_name,
+        "age_name": age_name,
+        "sex_name": sex_name,
+        "location_name": location_name,
+    }
+    if year_from is not None or year_to is not None:
+        year_filter: dict[str, int] = {}
+        if year_from is not None:
+            year_filter["$gte"] = year_from
+        if year_to is not None:
+            year_filter["$lte"] = year_to
+        filters["year"] = year_filter
+    if dense_years:
+        return get_imhe_value_percentiles_dense(filters, p, min_countries)
+    return get_imhe_value_percentiles(filters, p)

@@ -135,3 +135,96 @@ def list_causes(params: dict[str, Any]):
         {"$sort": {"cause_name": 1}},
     ]
     return list(col.aggregate(pipeline))
+
+
+def list_measures(params: dict[str, Any]):
+    col = get_imhe_collection()
+    filters = _build_filters(params)
+    pipeline = [
+        {"$match": filters},
+        {"$group": {"_id": {"measure_id": "$measure_id", "measure_name": "$measure_name"}}},
+        {"$project": {"_id": 0, "measure_id": "$_id.measure_id", "measure_name": "$_id.measure_name"}},
+        {"$sort": {"measure_name": 1}},
+    ]
+    return list(col.aggregate(pipeline))
+
+
+def list_metrics(params: dict[str, Any]):
+    col = get_imhe_collection()
+    filters = _build_filters(params)
+    pipeline = [
+        {"$match": filters},
+        {"$group": {"_id": {"metric_id": "$metric_id", "metric_name": "$metric_name"}}},
+        {"$project": {"_id": 0, "metric_id": "$_id.metric_id", "metric_name": "$_id.metric_name"}},
+        {"$sort": {"metric_name": 1}},
+    ]
+    return list(col.aggregate(pipeline))
+
+
+def trend_by_year(params: dict[str, Any]):
+    col = get_imhe_collection()
+    filters = _build_filters(params)
+    pipeline = [
+        {"$match": filters},
+        {"$group": {"_id": "$year", "value": {"$avg": "$val"}}},
+        {"$project": {"_id": 0, "year": "$_id", "value": 1}},
+        {"$sort": {"year": 1}},
+    ]
+    return list(col.aggregate(pipeline))
+
+
+def value_percentiles(params: dict[str, Any], pcts: list[float]):
+    col = get_imhe_collection()
+    filters = _build_filters(params)
+    pipeline = [
+        {"$match": filters},
+        {
+            "$group": {
+                "_id": None,
+                "percentiles": {"$percentile": {"input": "$val", "p": pcts, "method": "approximate"}},
+                "min_val": {"$min": "$val"},
+                "max_val": {"$max": "$val"},
+                "count": {"$sum": 1},
+            }
+        },
+        {"$project": {"_id": 0, "percentiles": 1, "min_val": 1, "max_val": 1, "count": 1}},
+    ]
+    res = list(col.aggregate(pipeline))
+    return res[0] if res else {"percentiles": [], "min_val": None, "max_val": None, "count": 0}
+
+
+def value_percentiles_dense_years(
+    params: dict[str, Any], pcts: list[float], min_countries: int
+):
+    col = get_imhe_collection()
+    filters = _build_filters(params)
+    filters.pop("year", None)
+
+    year_pipeline = [
+        {"$match": filters},
+        {"$group": {"_id": {"year": "$year", "country": "$location_name"}}},
+        {"$group": {"_id": "$_id.year", "country_count": {"$sum": 1}}},
+        {"$match": {"country_count": {"$gte": int(min_countries)}}},
+        {"$sort": {"_id": 1}},
+    ]
+    dense_years = [row["_id"] for row in col.aggregate(year_pipeline)]
+    if not dense_years:
+        return {"percentiles": [], "min_val": None, "max_val": None, "count": 0}
+
+    dense_filters = dict(filters)
+    dense_filters["year"] = {"$in": dense_years}
+    pipeline = [
+        {"$match": dense_filters},
+        {
+            "$group": {
+                "_id": None,
+                "percentiles": {"$percentile": {"input": "$val", "p": pcts, "method": "approximate"}},
+                "min_val": {"$min": "$val"},
+                "max_val": {"$max": "$val"},
+                "count": {"$sum": 1},
+            }
+        },
+        {"$project": {"_id": 0, "percentiles": 1, "min_val": 1, "max_val": 1, "count": 1}},
+    ]
+    res = list(col.aggregate(pipeline))
+    return res[0] if res else {"percentiles": [], "min_val": None, "max_val": None, "count": 0}

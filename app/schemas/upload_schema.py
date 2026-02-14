@@ -27,3 +27,33 @@ class UploadRead(BaseModel):
 class UploadUpdateStatus(BaseModel):
     status: UploadStatus
     error_message: Optional[str] = None
+
+
+class HealthIMHERecordManual(BaseModel):
+    measure_name: str
+    location_name: str
+    sex_name: str
+    age_name: str
+    cause_name: str
+    metric_name: str
+    year: int
+    val: float
+    upper: float | None = None
+    lower: float | None = None
+
+
+class UploadRecordList(BaseModel):
+    total: int
+    items: list[dict]
+
+
+class UploadRecordUpdate(BaseModel):
+    measure_name: str
+    sex_name: str
+    age_name: str
+    cause_name: str
+    metric_name: str
+    year: int
+    val: float
+    upper: float | None = None
+    lower: float | None = None

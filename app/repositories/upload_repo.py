@@ -47,3 +47,8 @@ def update_upload_status(db: Session, upload: Upload, data: UploadUpdateStatus) 
     db.commit()
     db.refresh(upload)
     return upload
+
+
+def delete_upload(db: Session, upload: Upload) -> None:
+    db.delete(upload)
+    db.commit()

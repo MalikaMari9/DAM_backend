@@ -54,3 +54,25 @@ class IMHESexItem(BaseModel):
 class IMHECauseItem(BaseModel):
     cause_id: int
     cause_name: str
+
+
+class IMHEMeasureItem(BaseModel):
+    measure_id: int
+    measure_name: str
+
+
+class IMHEMetricItem(BaseModel):
+    metric_id: int
+    metric_name: str
+
+
+class IMHEValuePercentiles(BaseModel):
+    percentiles: list[float]
+    min_val: float | None = None
+    max_val: float | None = None
+    count: int
+
+
+class IMHEYearValueItem(BaseModel):
+    year: int
+    value: float

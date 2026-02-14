@@ -12,7 +12,7 @@ class Settings(BaseModel):
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 60
     upload_dir: str = "uploads"
-    max_upload_bytes: int = 10 * 1024 * 1024
+    max_upload_bytes: int = 50 * 1024 * 1024
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_user: str | None = None
@@ -40,7 +40,7 @@ def get_settings() -> Settings:
             jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
             jwt_expires_minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "60")),
             upload_dir=os.getenv("UPLOAD_DIR", "uploads"),
-            max_upload_bytes=int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024))),
+            max_upload_bytes=int(os.getenv("MAX_UPLOAD_BYTES", str(50 * 1024 * 1024))),
             smtp_host=os.getenv("SMTP_HOST"),
             smtp_port=int(os.getenv("SMTP_PORT", "587")),
             smtp_user=os.getenv("SMTP_USER"),
