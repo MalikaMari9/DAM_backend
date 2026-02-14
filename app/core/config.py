@@ -19,6 +19,9 @@ class Settings(BaseModel):
     smtp_pass: str | None = None
     smtp_from: str | None = None
     frontend_base_url: str = "http://localhost:8080"
+    mongo_uri: str | None = None
+    mongo_db_health: str = "Health"
+    mongo_collection_imhe: str = "IMHE"
 
 
 _settings: Optional[Settings] = None
@@ -44,5 +47,8 @@ def get_settings() -> Settings:
             smtp_pass=os.getenv("SMTP_PASS"),
             smtp_from=os.getenv("SMTP_FROM"),
             frontend_base_url=os.getenv("FRONTEND_BASE_URL", "http://localhost:8080"),
+            mongo_uri=os.getenv("MONGO_URI"),
+            mongo_db_health=os.getenv("MONGO_DB_HEALTH", "Health"),
+            mongo_collection_imhe=os.getenv("MONGO_COLLECTION_IMHE", "IMHE"),
         )
     return _settings

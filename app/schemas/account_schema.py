@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 from typing import Optional
 from app.models.enums import AccountRole
 
@@ -17,8 +17,7 @@ class AccountCreate(AccountBase):
 class AccountRead(AccountBase):
     account_id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AccountLogin(BaseModel):

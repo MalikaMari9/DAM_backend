@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 from typing import Optional
 from datetime import datetime
 from app.models.enums import OrgType, DataDomain, ApplicationStatus
@@ -32,5 +32,4 @@ class OrgApplicationRead(OrgApplicationBase):
     submitted_at: datetime
     reviewed_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
