@@ -18,3 +18,11 @@ def get_imhe_collection():
     coll_name = getattr(settings, "mongo_collection_imhe", "IMHE")
     client = _get_client()
     return client[db_name][coll_name]
+
+
+def get_openaq_collection():
+    settings = get_settings()
+    db_name = getattr(settings, "mongo_db_pollution", "Pollution")
+    coll_name = getattr(settings, "mongo_collection_openaq", "OpenAQ")
+    client = _get_client()
+    return client[db_name][coll_name]

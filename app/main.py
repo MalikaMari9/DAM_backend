@@ -8,6 +8,7 @@ from app.routes.files import router as files_router
 from app.routes.uploads import router as uploads_router
 from app.routes.admin import router as admin_router
 from app.routes.health_imhe import router as health_imhe_router
+from app.routes.pollution_openaq import router as pollution_openaq_router
 
 app = FastAPI()
 
@@ -33,3 +34,4 @@ app.include_router(files_router)
 app.include_router(uploads_router)
 app.include_router(admin_router)
 app.include_router(health_imhe_router)
+app.include_router(pollution_openaq_router)

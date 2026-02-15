@@ -1,0 +1,31 @@
+from fastapi import APIRouter, Query, HTTPException, status
+from app.controllers.pollution_openaq_controller import list_openaq_items
+from app.schemas.pollution_openaq_schema import OpenAQListResponse
+
+router = APIRouter(prefix="/pollution/openaq", tags=["pollution-openaq"])
+
+ALLOWED_METRICS = {"value", "avg", "min", "max", "median"}
+
+
+@router.get("", response_model=OpenAQListResponse)
+def list_openaq(
+    year: int = Query(...),
+    country_name: str | None = Query(default=None),
+    pollutant: str | None = Query(default=None),
+    metric: str = Query(default="value"),
+    limit: int = Query(default=1000, ge=1, le=5000),
+):
+    metric_value = metric.strip().lower()
+    if metric_value not in ALLOWED_METRICS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"metric must be one of {sorted(ALLOWED_METRICS)}",
+        )
+
+    filters = {
+        "year": year,
+        "country_name": country_name,
+        "pollutant": pollutant,
+    }
+    total, items = list_openaq_items(filters, limit=limit, metric=metric_value)
+    return {"total": total, "items": items}

@@ -22,6 +22,8 @@ class Settings(BaseModel):
     mongo_uri: str | None = None
     mongo_db_health: str = "Health"
     mongo_collection_imhe: str = "IMHE"
+    mongo_db_pollution: str = "Pollution"
+    mongo_collection_openaq: str = "OpenAQ"
 
 
 _settings: Optional[Settings] = None
@@ -50,5 +52,7 @@ def get_settings() -> Settings:
             mongo_uri=os.getenv("MONGO_URI"),
             mongo_db_health=os.getenv("MONGO_DB_HEALTH", "Health"),
             mongo_collection_imhe=os.getenv("MONGO_COLLECTION_IMHE", "IMHE"),
+            mongo_db_pollution=os.getenv("MONGO_DB_POLLUTION", "Pollution"),
+            mongo_collection_openaq=os.getenv("MONGO_COLLECTION_OPENAQ", "OpenAQ"),
         )
     return _settings
