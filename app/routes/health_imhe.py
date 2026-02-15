@@ -272,6 +272,8 @@ def imhe_metrics(
 
 @router.get("/trend", response_model=list[IMHEYearValueItem])
 def imhe_trend(
+    year_from: int | None = Query(default=None),
+    year_to: int | None = Query(default=None),
     measure_name: str | None = Query(default=None),
     metric_name: str | None = Query(default=None),
     cause_name: str | None = Query(default=None),
@@ -288,6 +290,13 @@ def imhe_trend(
         "sex_name": sex_name,
         "location_name": location_name,
     }
+    if year_from is not None or year_to is not None:
+        year_filter: dict[str, int] = {}
+        if year_from is not None:
+            year_filter["$gte"] = year_from
+        if year_to is not None:
+            year_filter["$lte"] = year_to
+        filters["year"] = year_filter
     return get_imhe_trend(filters)
 
 

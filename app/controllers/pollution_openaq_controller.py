@@ -28,6 +28,7 @@ def get_openaq_trend(
     pollutant: str | None,
     country_name: str | None,
     metric: str,
+    method: str,
 ):
     return trend_by_year(
         year_from=year_from,
@@ -35,4 +36,5 @@ def get_openaq_trend(
         pollutant=pollutant,
         country_name=country_name,
         metric=metric,
+        method=method,
     )

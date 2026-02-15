@@ -45,6 +45,8 @@ class IMHECountryPollutionSummaryItem(BaseModel):
     country: str
     value: float
     count: int
+    pollution_value: float | None = None
+    pollutant: str | None = None
     pollution_pm25: float | None = None
 
 
