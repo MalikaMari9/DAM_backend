@@ -42,6 +42,21 @@ class HealthIMHERecordManual(BaseModel):
     lower: float | None = None
 
 
+class PollutionOpenAQRecordManual(BaseModel):
+    location_name: str
+    year: int
+    pollutant: str
+    units: str
+    value: float
+    latitude: float | None = None
+    longitude: float | None = None
+    min: float | None = None
+    max: float | None = None
+    median: float | None = None
+    avg: float | None = None
+    coverage_percent: float | None = None
+
+
 class UploadRecordList(BaseModel):
     total: int
     items: list[dict]

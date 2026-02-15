@@ -1,5 +1,11 @@
 from typing import Any
-from app.repositories.pollution_openaq_repo import list_openaq, trend_by_year
+from app.repositories.pollution_openaq_repo import (
+    list_openaq,
+    trend_by_year,
+    list_distinct_pollutants,
+    list_distinct_units,
+    list_location_suggestions,
+)
 
 
 def _get_metric_value(item: dict, metric: str):
@@ -14,8 +20,8 @@ def _get_metric_value(item: dict, metric: str):
     return item.get("value")
 
 
-def list_openaq_items(filters: dict[str, Any], limit: int, metric: str):
-    total, items = list_openaq(filters, limit=limit, metric=metric)
+def list_openaq_items(filters: dict[str, Any], limit: int, offset: int, metric: str):
+    total, items = list_openaq(filters, limit=limit, offset=offset, metric=metric)
     for item in items:
         item["metric"] = metric
         item["metric_value"] = _get_metric_value(item, metric)
@@ -38,3 +44,15 @@ def get_openaq_trend(
         metric=metric,
         method=method,
     )
+
+
+def get_openaq_pollutants(country_name: str | None = None):
+    return list_distinct_pollutants(country_name=country_name)
+
+
+def get_openaq_units(country_name: str | None = None, pollutant: str | None = None):
+    return list_distinct_units(country_name=country_name, pollutant=pollutant)
+
+
+def get_openaq_locations(country_name: str | None, query: str | None, limit: int = 20):
+    return list_location_suggestions(country_name=country_name, query=query, limit=limit)

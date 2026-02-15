@@ -10,6 +10,10 @@ from app.controllers.upload_controller import (
     confirm_health_csv_upload,
     list_csv_dupes,
     create_health_record_upload,
+    create_pollution_csv_validation,
+    confirm_pollution_csv_upload,
+    list_pollution_csv_dupes,
+    create_pollution_record_upload,
     list_upload_records,
     update_upload_record,
     delete_upload_with_records,
@@ -19,6 +23,7 @@ from app.schemas.upload_schema import (
     UploadRead,
     UploadUpdateStatus,
     HealthIMHERecordManual,
+    PollutionOpenAQRecordManual,
     UploadRecordList,
     UploadRecordUpdate,
 )
@@ -41,10 +46,10 @@ async def upload_health_csv_validate(
     db: Session = Depends(get_db),
     account=Depends(require_org),
 ):
-    if file.filename and not file.filename.lower().endswith(".csv"):
+    if file.filename and not any(file.filename.lower().endswith(ext) for ext in (".csv", ".xlsx", ".xls", ".json")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only CSV files are supported for health uploads.",
+            detail="Only CSV, Excel (.xlsx/.xls), or JSON files are supported for health uploads.",
         )
     file_bytes = await file.read()
     return create_health_csv_validation(
@@ -55,6 +60,26 @@ async def upload_health_csv_validate(
     )
 
 
+@router.post("/pollution/csv/validate")
+async def upload_pollution_csv_validate(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    account=Depends(require_org),
+):
+    if file.filename and not any(file.filename.lower().endswith(ext) for ext in (".csv", ".xlsx", ".xls", ".json")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only CSV, Excel (.xlsx/.xls), or JSON files are supported for pollution uploads.",
+        )
+    file_bytes = await file.read()
+    return create_pollution_csv_validation(
+        db,
+        account,
+        file_bytes=file_bytes,
+        filename=file.filename or "pollution.csv",
+    )
+
+
 @router.post("/health/csv/confirm", response_model=UploadRead)
 def upload_health_csv_confirm(
     token: str,
@@ -62,6 +87,15 @@ def upload_health_csv_confirm(
     account=Depends(require_org),
 ):
     return confirm_health_csv_upload(db, account, token)
+
+
+@router.post("/pollution/csv/confirm", response_model=UploadRead)
+def upload_pollution_csv_confirm(
+    token: str,
+    db: Session = Depends(get_db),
+    account=Depends(require_org),
+):
+    return confirm_pollution_csv_upload(db, account, token)
 
 
 @router.get("/health/csv/dupes")
@@ -75,6 +109,17 @@ def upload_health_csv_dupes(
     return list_csv_dupes(db, account, token, limit=limit, offset=offset)
 
 
+@router.get("/pollution/csv/dupes")
+def upload_pollution_csv_dupes(
+    token: str,
+    limit: int = 5,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    account=Depends(require_org),
+):
+    return list_pollution_csv_dupes(db, account, token, limit=limit, offset=offset)
+
+
 @router.post("/health/record", response_model=UploadRead)
 def upload_health_record(
     payload: HealthIMHERecordManual,
@@ -82,6 +127,15 @@ def upload_health_record(
     account=Depends(require_org),
 ):
     return create_health_record_upload(db, account, payload)
+
+
+@router.post("/pollution/record", response_model=UploadRead)
+def upload_pollution_record(
+    payload: PollutionOpenAQRecordManual,
+    db: Session = Depends(get_db),
+    account=Depends(require_org),
+):
+    return create_pollution_record_upload(db, account, payload)
 
 
 @router.get("", response_model=list[UploadRead])

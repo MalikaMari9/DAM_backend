@@ -13,14 +13,22 @@ def _build_filters(params: dict[str, Any]) -> dict[str, Any]:
     if pollutant:
         filters["pollutant"] = pollutant
 
-    country_name = params.get("country_name")
-    if country_name:
-        filters["country_name"] = exact_country_regex(country_name)
+    country_names = params.get("country_names")
+    if country_names:
+        names = [name for name in country_names if isinstance(name, str) and name.strip()]
+        if names:
+            filters["$or"] = [
+                {"country_name": exact_country_regex(name)} for name in names
+            ]
+    else:
+        country_name = params.get("country_name")
+        if country_name:
+            filters["country_name"] = exact_country_regex(country_name)
 
     return filters
 
 
-def list_openaq(params: dict[str, Any], limit: int, metric: str):
+def list_openaq(params: dict[str, Any], limit: int, offset: int, metric: str):
     col = get_openaq_collection()
     filters = _build_filters(params)
     sort_field = metric if metric in {"value", "avg", "min", "max", "median"} else "value"
@@ -43,17 +51,60 @@ def list_openaq(params: dict[str, Any], limit: int, metric: str):
             "median": 1,
             "avg": 1,
         },
-    ).sort(sort_field, -1).limit(int(limit))
+    ).sort(sort_field, -1).skip(int(offset)).limit(int(limit))
     items = list(cursor)
     total = col.count_documents(filters)
     return total, items
+
+
+def list_distinct_pollutants(country_name: str | None = None):
+    col = get_openaq_collection()
+    match: dict[str, Any] = {}
+    if country_name:
+        match["country_name"] = exact_country_regex(country_name)
+    if match:
+        return sorted([p for p in col.distinct("pollutant", match) if p])
+    return sorted([p for p in col.distinct("pollutant") if p])
+
+
+def list_distinct_units(country_name: str | None = None, pollutant: str | None = None):
+    col = get_openaq_collection()
+    match: dict[str, Any] = {}
+    if country_name:
+        match["country_name"] = exact_country_regex(country_name)
+    if pollutant:
+        match["pollutant"] = pollutant
+    if match:
+        return sorted([u for u in col.distinct("units", match) if u])
+    return sorted([u for u in col.distinct("units") if u])
+
+
+def list_location_suggestions(country_name: str | None, query: str | None, limit: int = 20):
+    col = get_openaq_collection()
+    match: dict[str, Any] = {}
+    if country_name:
+        match["country_name"] = exact_country_regex(country_name)
+    if query:
+        match["location_name"] = {"$regex": query, "$options": "i"}
+    pipeline = []
+    if match:
+        pipeline.append({"$match": match})
+    pipeline.extend(
+        [
+            {"$group": {"_id": "$location_name"}},
+            {"$sort": {"_id": 1}},
+            {"$limit": int(limit)},
+        ]
+    )
+    results = col.aggregate(pipeline)
+    return [doc["_id"] for doc in results if doc.get("_id")]
 
 
 def country_coverage_avg(year: int, pollutant: str = "PM2.5", country_name: str | None = None):
     col = get_openaq_collection()
     match: dict[str, Any] = {
         "year": int(year),
-        "coverage_percent": {"$gte": 50},
+        "coverage_percent": {"$type": "number"},
         "avg": {"$type": "number"},
     }
     if pollutant:
