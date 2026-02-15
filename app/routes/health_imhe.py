@@ -12,11 +12,13 @@ from app.controllers.health_imhe_controller import (
     get_imhe_value_percentiles,
     get_imhe_value_percentiles_dense,
     get_imhe_trend,
+    get_imhe_country_summary_with_pollution,
 )
 from app.schemas.health_imhe_schema import (
     IMHEListResponse,
     IMHESummary,
     IMHECountrySummaryItem,
+    IMHECountryPollutionSummaryItem,
     IMHEAgeItem,
     IMHESexItem,
     IMHECauseItem,
@@ -123,6 +125,44 @@ def imhe_country_summary(
         "location_name": location_name,
     }
     return get_imhe_country_summary(filters)
+
+
+@router.get("/country-summary-with-pollution", response_model=list[IMHECountryPollutionSummaryItem])
+def imhe_country_summary_with_pollution(
+    year: int = Query(...),
+    pollutant: str = Query(default="PM2.5"),
+    location_id: int | None = Query(default=None),
+    cause_id: int | None = Query(default=None),
+    age_id: int | None = Query(default=None),
+    sex_id: int | None = Query(default=None),
+    measure_id: int | None = Query(default=None),
+    metric_id: int | None = Query(default=None),
+    measure_name: str | None = Query(default=None),
+    metric_name: str | None = Query(default=None),
+    cause_name: str | None = Query(default=None),
+    cause_name_contains: str | None = Query(default=None),
+    age_name: str | None = Query(default=None),
+    sex_name: str | None = Query(default=None),
+    location_name: str | None = Query(default=None),
+):
+    filters = {
+        "exclude_age_names": EXCLUDED_AGE_NAMES,
+        "year": year,
+        "location_id": location_id,
+        "cause_id": cause_id,
+        "age_id": age_id,
+        "sex_id": sex_id,
+        "measure_id": measure_id,
+        "metric_id": metric_id,
+        "measure_name": measure_name,
+        "metric_name": metric_name,
+        "cause_name": cause_name,
+        "cause_name_contains": cause_name_contains,
+        "age_name": age_name,
+        "sex_name": sex_name,
+        "location_name": location_name,
+    }
+    return get_imhe_country_summary_with_pollution(filters, pollutant=pollutant)
 
 
 @router.get("/ages", response_model=list[IMHEAgeItem])

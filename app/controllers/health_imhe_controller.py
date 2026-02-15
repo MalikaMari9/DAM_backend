@@ -12,6 +12,29 @@ from app.repositories.health_imhe_repo import (
     value_percentiles_dense_years,
     trend_by_year,
 )
+from app.repositories.pollution_openaq_repo import country_coverage_avg
+
+
+_COUNTRY_ALIASES = {
+    "united states of america": "united states",
+    "russian federation": "russia",
+    "iran (islamic republic of)": "iran",
+    "bolivia (plurinational state of)": "bolivia",
+    "venezuela (bolivarian republic of)": "venezuela",
+    "tanzania, united republic of": "tanzania",
+    "viet nam": "vietnam",
+    "lao people's democratic republic": "laos",
+    "cote d'ivoire": "ivory coast",
+    "republic of korea": "south korea",
+    "democratic people's republic of korea": "north korea",
+    "hong kong sar": "hong kong",
+    "hong kong, china": "hong kong",
+}
+
+
+def _normalize_country_name(value: str) -> str:
+    base = " ".join(value.strip().lower().split())
+    return _COUNTRY_ALIASES.get(base, base)
 
 
 def get_imhe_list(filters, limit: int, offset: int):
@@ -28,6 +51,23 @@ def get_imhe_summary():
 
 def get_imhe_country_summary(filters):
     return country_summary(filters)
+
+
+def get_imhe_country_summary_with_pollution(filters, pollutant: str = "PM2.5"):
+    health_items = country_summary(filters)
+    year = filters.get("year")
+    if year is None:
+        return health_items
+    openaq_items = country_coverage_avg(year=year, pollutant=pollutant)
+    openaq_map = {
+        _normalize_country_name(item["country"]): item.get("pollution_pm25")
+        for item in openaq_items
+        if item.get("country")
+    }
+    for item in health_items:
+        name = _normalize_country_name(item.get("country", ""))
+        item["pollution_pm25"] = openaq_map.get(name)
+    return health_items
 
 
 def get_imhe_ages(filters):

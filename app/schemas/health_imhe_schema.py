@@ -41,6 +41,13 @@ class IMHECountrySummaryItem(BaseModel):
     count: int
 
 
+class IMHECountryPollutionSummaryItem(BaseModel):
+    country: str
+    value: float
+    count: int
+    pollution_pm25: float | None = None
+
+
 class IMHEAgeItem(BaseModel):
     age_id: int
     age_name: str

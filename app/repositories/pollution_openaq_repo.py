@@ -65,3 +65,44 @@ def list_openaq(params: dict[str, Any], limit: int, metric: str):
     items = list(cursor)
     total = col.count_documents(filters)
     return total, items
+
+
+def country_coverage_avg(year: int, pollutant: str = "PM2.5", country_name: str | None = None):
+    col = get_openaq_collection()
+    match: dict[str, Any] = {
+        "year": int(year),
+        "coverage_percent": {"$gte": 50},
+        "avg": {"$type": "number"},
+    }
+    if pollutant:
+        match["pollutant"] = pollutant
+    if country_name:
+        match["country_name"] = {"$regex": f"^{re.escape(country_name)}$", "$options": "i"}
+
+    pipeline = [
+        {"$match": match},
+        {
+            "$group": {
+                "_id": "$country_name",
+                "numerator": {"$sum": {"$multiply": ["$avg", "$coverage_percent"]}},
+                "denominator": {"$sum": "$coverage_percent"},
+                "count": {"$sum": 1},
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "country": "$_id",
+                "pollution_pm25": {
+                    "$cond": [
+                        {"$gt": ["$denominator", 0]},
+                        {"$divide": ["$numerator", "$denominator"]},
+                        None,
+                    ]
+                },
+                "count": 1,
+            }
+        },
+        {"$sort": {"country": 1}},
+    ]
+    return list(col.aggregate(pipeline))
