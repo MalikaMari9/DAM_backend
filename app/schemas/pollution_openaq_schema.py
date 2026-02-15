@@ -24,3 +24,8 @@ class OpenAQItem(BaseModel):
 class OpenAQListResponse(BaseModel):
     total: int
     items: list[OpenAQItem]
+
+
+class OpenAQTrendItem(BaseModel):
+    year: int
+    value: float | None = None

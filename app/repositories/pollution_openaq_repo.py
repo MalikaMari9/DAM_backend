@@ -106,3 +106,31 @@ def country_coverage_avg(year: int, pollutant: str = "PM2.5", country_name: str 
         {"$sort": {"country": 1}},
     ]
     return list(col.aggregate(pipeline))
+
+
+def trend_by_year(
+    year_from: int,
+    year_to: int,
+    pollutant: str | None = None,
+    country_name: str | None = None,
+    metric: str = "avg",
+):
+    col = get_openaq_collection()
+    match: dict[str, Any] = {
+        "year": {"$gte": int(year_from), "$lte": int(year_to)},
+    }
+    if pollutant:
+        match["pollutant"] = pollutant
+    if country_name:
+        normalized = _normalize_country_name(country_name)
+        match["country_name"] = {"$regex": f"^{re.escape(normalized)}$", "$options": "i"}
+    metric_field = metric if metric in {"value", "avg", "min", "max", "median"} else "avg"
+    match[metric_field] = {"$type": "number"}
+
+    pipeline = [
+        {"$match": match},
+        {"$group": {"_id": "$year", "value": {"$avg": f"${metric_field}"}}},
+        {"$project": {"_id": 0, "year": "$_id", "value": 1}},
+        {"$sort": {"year": 1}},
+    ]
+    return list(col.aggregate(pipeline))

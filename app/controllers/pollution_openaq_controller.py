@@ -1,5 +1,5 @@
 from typing import Any
-from app.repositories.pollution_openaq_repo import list_openaq
+from app.repositories.pollution_openaq_repo import list_openaq, trend_by_year
 
 
 def _get_metric_value(item: dict, metric: str):
@@ -20,3 +20,19 @@ def list_openaq_items(filters: dict[str, Any], limit: int, metric: str):
         item["metric"] = metric
         item["metric_value"] = _get_metric_value(item, metric)
     return total, items
+
+
+def get_openaq_trend(
+    year_from: int,
+    year_to: int,
+    pollutant: str | None,
+    country_name: str | None,
+    metric: str,
+):
+    return trend_by_year(
+        year_from=year_from,
+        year_to=year_to,
+        pollutant=pollutant,
+        country_name=country_name,
+        metric=metric,
+    )
