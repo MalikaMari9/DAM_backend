@@ -16,6 +16,7 @@ from app.controllers.upload_controller import (
     create_pollution_record_upload,
     list_upload_records,
     update_upload_record,
+    update_pollution_record,
     delete_upload_with_records,
 )
 from app.schemas.upload_schema import (
@@ -26,6 +27,7 @@ from app.schemas.upload_schema import (
     PollutionOpenAQRecordManual,
     UploadRecordList,
     UploadRecordUpdate,
+    PollutionOpenAQRecordUpdate,
 )
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
@@ -176,6 +178,17 @@ def update_upload_record_route(
     account=Depends(get_current_account),
 ):
     return update_upload_record(db, account, upload_id, record_id, payload)
+
+
+@router.patch("/{upload_id}/pollution-records/{record_id}")
+def update_pollution_record_route(
+    upload_id: int,
+    record_id: str,
+    payload: PollutionOpenAQRecordUpdate,
+    db: Session = Depends(get_db),
+    account=Depends(get_current_account),
+):
+    return update_pollution_record(db, account, upload_id, record_id, payload)
 
 
 @router.delete("/{upload_id}")

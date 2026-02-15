@@ -72,3 +72,20 @@ class UploadRecordUpdate(BaseModel):
     val: float
     upper: float | None = None
     lower: float | None = None
+
+
+class PollutionOpenAQRecordUpdate(BaseModel):
+    location_name: str
+    year: int
+    pollutant: str
+    units: str
+    value: float
+    latitude: float | None = None
+    longitude: float | None = None
+    min: float | None = None
+    max: float | None = None
+    median: float | None = None
+    avg: float | None = None
+    coverage_percent: float | None = None
+    sensor_id: int | None = None
+    location_id: int | None = None

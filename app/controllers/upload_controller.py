@@ -27,6 +27,7 @@ from app.schemas.upload_schema import (
     HealthIMHERecordManual,
     PollutionOpenAQRecordManual,
     UploadRecordUpdate,
+    PollutionOpenAQRecordUpdate,
 )
 
 IMHE_REQUIRED_FIELDS = [
@@ -230,10 +231,57 @@ def _parse_optional_float(value: str | None):
 def _parse_optional_int(value: str | None):
     if value is None:
         return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int,)):
+        return int(value)
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value)
+        raise ValueError("Expected an integer value.")
     text = str(value).strip()
     if text == "":
         return None
-    return int(text)
+    try:
+        return int(text)
+    except ValueError:
+        # Handle Excel-style numeric strings like "123.0"
+        as_float = float(text)
+        if as_float.is_integer():
+            return int(as_float)
+        raise ValueError("Expected an integer value.")
+
+
+def _parse_required_int(value: object, field_name: str, row_index: int) -> int:
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        raise ValueError(f"Row {row_index}: {field_name} is required.")
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value)
+        raise ValueError(f"Row {row_index}: {field_name} must be an integer.")
+    text = str(value).strip()
+    try:
+        return int(text)
+    except ValueError:
+        as_float = float(text)
+        if as_float.is_integer():
+            return int(as_float)
+        raise ValueError(f"Row {row_index}: {field_name} must be an integer.")
+
+
+def _parse_required_float(value: object, field_name: str, row_index: int) -> float:
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        raise ValueError(f"Row {row_index}: {field_name} is required.")
+    if isinstance(value, bool):
+        return float(int(value))
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    return float(text)
 
 
 def _require_fields(rows: list[dict], required: list[str]):
@@ -264,24 +312,24 @@ def _parse_imhe_rows(rows: list[dict], expected_country: str, row_offset: int) -
 
         try:
             doc = {
-                "population_group_id": int(str(row["population_group_id"]).strip()),
+                "population_group_id": _parse_required_int(row.get("population_group_id"), "population_group_id", idx),
                 "population_group_name": (row.get("population_group_name") or "").strip(),
-                "measure_id": int(str(row["measure_id"]).strip()),
+                "measure_id": _parse_required_int(row.get("measure_id"), "measure_id", idx),
                 "measure_name": (row.get("measure_name") or "").strip(),
-                "location_id": int(str(row["location_id"]).strip()),
+                "location_id": _parse_required_int(row.get("location_id"), "location_id", idx),
                 "location_name": location_name,
-                "sex_id": int(str(row["sex_id"]).strip()),
+                "sex_id": _parse_required_int(row.get("sex_id"), "sex_id", idx),
                 "sex_name": (row.get("sex_name") or "").strip(),
-                "age_id": int(str(row["age_id"]).strip()),
+                "age_id": _parse_required_int(row.get("age_id"), "age_id", idx),
                 "age_name": (row.get("age_name") or "").strip(),
-                "cause_id": int(str(row["cause_id"]).strip()),
+                "cause_id": _parse_required_int(row.get("cause_id"), "cause_id", idx),
                 "cause_name": (row.get("cause_name") or "").strip(),
-                "metric_id": int(str(row["metric_id"]).strip()),
+                "metric_id": _parse_required_int(row.get("metric_id"), "metric_id", idx),
                 "metric_name": (row.get("metric_name") or "").strip(),
-                "year": int(str(row["year"]).strip()),
-                "val": float(str(row["val"]).strip()),
-                "upper": float(str(row["upper"]).strip()),
-                "lower": float(str(row["lower"]).strip()),
+                "year": _parse_required_int(row.get("year"), "year", idx),
+                "val": _parse_required_float(row.get("val"), "val", idx),
+                "upper": _parse_required_float(row.get("upper"), "upper", idx),
+                "lower": _parse_required_float(row.get("lower"), "lower", idx),
             }
         except (ValueError, TypeError) as exc:
             raise ValueError(f"Row {idx}: invalid numeric value ({exc}).") from exc
@@ -324,11 +372,11 @@ def _parse_pollution_rows(rows: list[dict], expected_country: str, row_offset: i
         try:
             doc = {
                 "country_name": country_name,
-                "year": int(str(row["year"]).strip()),
+                "year": _parse_required_int(row.get("year"), "year", idx),
                 "location_name": location_name,
                 "pollutant": pollutant,
                 "units": units,
-                "value": float(str(row["value"]).strip()),
+                "value": _parse_required_float(row.get("value"), "value", idx),
                 "latitude": _parse_optional_float(row.get("latitude")),
                 "longitude": _parse_optional_float(row.get("longitude")),
                 "min": _parse_optional_float(row.get("min")),
@@ -405,7 +453,7 @@ def _parse_imhe_csv(file_bytes: bytes, expected_country: str) -> tuple[list[dict
     return _parse_imhe_rows(rows, expected_country, row_offset=2)
 
 
-def _parse_pollution_csv(file_bytes: bytes, expected_country: str) -> tuple[list[dict], str]:
+def _parse_pollution_csv_legacy(file_bytes: bytes, expected_country: str) -> tuple[list[dict], str]:
     text = file_bytes.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames:
@@ -1041,6 +1089,74 @@ def update_upload_record(
     update_doc["age_id"] = _resolve_id(col, "age_id", "age_name", payload.age_name)
     update_doc["cause_id"] = _resolve_id(col, "cause_id", "cause_name", payload.cause_name)
     update_doc["metric_id"] = _resolve_id(col, "metric_id", "metric_name", payload.metric_name)
+
+    result = col.update_one({"_id": doc_id, "_source_batch": batch_id}, {"$set": update_doc})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+    return {"status": "ok"}
+
+
+def update_pollution_record(
+    db: Session,
+    account: Account,
+    upload_id: int,
+    record_id: str,
+    payload: PollutionOpenAQRecordUpdate,
+):
+    upload = get_upload_by_id(db, upload_id)
+    if not upload:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found")
+    if account.role == AccountRole.ORG and account.org_id != upload.org_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+    if upload.mongo_collection != "OpenAQ":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not a pollution upload")
+
+    current_year = datetime.utcnow().year
+    if payload.year < 1900 or payload.year > current_year + 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"year must be between 1900 and {current_year + 3}",
+        )
+    if payload.value is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="value is required")
+
+    col = get_openaq_collection()
+    batch_id = ObjectId(upload.mongo_ref_id)
+    doc_id = ObjectId(record_id)
+
+    update_doc = {
+        "location_name": payload.location_name,
+        "pollutant": payload.pollutant,
+        "units": _normalize_units(payload.units) or payload.units,
+        "year": payload.year,
+        "value": payload.value,
+        "latitude": payload.latitude,
+        "longitude": payload.longitude,
+        "min": payload.min,
+        "max": payload.max,
+        "median": payload.median,
+        "avg": payload.avg,
+        "coverage_percent": payload.coverage_percent,
+        "sensor_id": payload.sensor_id,
+        "location_id": payload.location_id,
+    }
+
+    # Prevent duplicate key collisions if key fields changed.
+    dupe = col.find_one(
+        {
+            "_source_batch": batch_id,
+            "country_name": upload.country,
+            "location_name": payload.location_name,
+            "pollutant": payload.pollutant,
+            "year": payload.year,
+            "_id": {"$ne": doc_id},
+        }
+    )
+    if dupe:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Record already exists for the same country/location/pollutant/year.",
+        )
 
     result = col.update_one({"_id": doc_id, "_source_batch": batch_id}, {"$set": update_doc})
     if result.matched_count == 0:
