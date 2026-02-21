@@ -1,6 +1,6 @@
 from typing import Any
 from app.core.mongo import get_openaq_collection
-from app.core.country_normalize import exact_country_regex, normalize_country_key
+from app.core.country_normalize import exact_country_regex
 
 
 def _build_filters(params: dict[str, Any]) -> dict[str, Any]:
@@ -104,21 +104,46 @@ def country_coverage_avg(year: int, pollutant: str = "PM2.5", country_name: str 
     col = get_openaq_collection()
     match: dict[str, Any] = {
         "year": int(year),
-        "coverage_percent": {"$type": "number"},
+        "coverage_percent": {"$type": "number", "$gte": 0, "$lte": 100},
         "avg": {"$type": "number"},
     }
     if pollutant:
         match["pollutant"] = pollutant
     if country_name:
-        match["country_name"] = {"$regex": f"^{re.escape(country_name)}$", "$options": "i"}
+        match["country_name"] = exact_country_regex(country_name)
 
     pipeline = [
         {"$match": match},
         {
             "$group": {
-                "_id": "$country_name",
+                # Collapse to one row per location first to avoid overcounting
+                # countries with many repeated rows for the same location.
+                "_id": {"country_name": "$country_name", "location_name": "$location_name"},
                 "numerator": {"$sum": {"$multiply": ["$avg", "$coverage_percent"]}},
                 "denominator": {"$sum": "$coverage_percent"},
+                "coverage_mean": {"$avg": "$coverage_percent"},
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "country": "$_id.country_name",
+                "location_weighted_avg": {
+                    "$cond": [
+                        {"$gt": ["$denominator", 0]},
+                        {"$divide": ["$numerator", "$denominator"]},
+                        None,
+                    ]
+                },
+                "location_weight": "$coverage_mean",
+            }
+        },
+        {"$match": {"location_weighted_avg": {"$type": "number"}, "location_weight": {"$gt": 0}}},
+        {
+            "$group": {
+                "_id": "$country",
+                "numerator": {"$sum": {"$multiply": ["$location_weighted_avg", "$location_weight"]}},
+                "denominator": {"$sum": "$location_weight"},
                 "count": {"$sum": 1},
             }
         },

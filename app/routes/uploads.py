@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.auth import get_current_account, require_admin, require_org
+from app.core.config import get_settings
 from app.controllers.upload_controller import (
     create_org_upload,
     list_uploads_for_account,
@@ -33,6 +34,21 @@ from app.schemas.upload_schema import (
 router = APIRouter(prefix="/uploads", tags=["uploads"])
 
 
+async def _read_upload_bytes(file: UploadFile, max_bytes: int) -> bytes:
+    buffer = bytearray()
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        buffer.extend(chunk)
+        if len(buffer) > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File too large. Max size is {max_bytes} bytes.",
+            )
+    return bytes(buffer)
+
+
 @router.post("", response_model=UploadRead)
 def create_upload_route(
     payload: UploadCreate,
@@ -53,7 +69,8 @@ async def upload_health_csv_validate(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only CSV, Excel (.xlsx/.xls), or JSON files are supported for health uploads.",
         )
-    file_bytes = await file.read()
+    settings = get_settings()
+    file_bytes = await _read_upload_bytes(file, settings.max_upload_bytes)
     return create_health_csv_validation(
         db,
         account,
@@ -73,7 +90,8 @@ async def upload_pollution_csv_validate(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only CSV, Excel (.xlsx/.xls), or JSON files are supported for pollution uploads.",
         )
-    file_bytes = await file.read()
+    settings = get_settings()
+    file_bytes = await _read_upload_bytes(file, settings.max_upload_bytes)
     return create_pollution_csv_validation(
         db,
         account,

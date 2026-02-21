@@ -25,6 +25,16 @@ def me_route(account=Depends(get_current_account)):
     return account
 
 
+@router.get("/verify")
+def verify_route(_account=Depends(get_current_account)):
+    return {"status": "ok"}
+
+
+@router.post("/logout")
+def logout_route(_account=Depends(get_current_account)):
+    return {"status": "ok"}
+
+
 @router.post("/change-password")
 def change_password_route(
     payload: PasswordChange,

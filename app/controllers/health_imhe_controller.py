@@ -38,10 +38,26 @@ def get_imhe_country_summary_with_pollution(filters, pollutant: str = "PM2.5"):
     if year is None:
         return health_items
     openaq_items = country_coverage_avg(year=year, pollutant=pollutant)
+    weighted_by_country: dict[str, dict[str, float]] = {}
+    for item in openaq_items:
+        country = item.get("country")
+        value = item.get("pollution_pm25")
+        if not country or value is None:
+            continue
+        key = normalize_country_key(country)
+        weight_raw = item.get("count", 1)
+        try:
+            weight = float(weight_raw)
+        except Exception:
+            weight = 1.0
+        if weight <= 0:
+            weight = 1.0
+        bucket = weighted_by_country.setdefault(key, {"numerator": 0.0, "denominator": 0.0})
+        bucket["numerator"] += float(value) * weight
+        bucket["denominator"] += weight
     openaq_map = {
-        normalize_country_key(item["country"]): item.get("pollution_pm25")
-        for item in openaq_items
-        if item.get("country")
+        key: (vals["numerator"] / vals["denominator"] if vals["denominator"] > 0 else None)
+        for key, vals in weighted_by_country.items()
     }
     for item in health_items:
         name = normalize_country_key(item.get("country", ""))

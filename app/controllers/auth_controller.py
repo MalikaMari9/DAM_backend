@@ -62,7 +62,8 @@ def _send_reset_email(to_email: str, reset_link: str):
 def forgot_password(db: Session, email: str):
     account = get_account_by_email(db, email)
     if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
+        # Avoid account enumeration
+        return {"status": "ok"}
 
     token = secrets.token_urlsafe(32)
     token_hash = _hash_token(token)

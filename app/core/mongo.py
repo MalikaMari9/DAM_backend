@@ -26,3 +26,19 @@ def get_openaq_collection():
     coll_name = getattr(settings, "mongo_collection_openaq", "OpenAQ")
     client = _get_client()
     return client[db_name][coll_name]
+
+
+def get_who_collection():
+    settings = get_settings()
+    db_name = getattr(settings, "mongo_db_pollution", "Pollution")
+    coll_name = getattr(settings, "mongo_collection_who", "WHO")
+    client = _get_client()
+    return client[db_name][coll_name]
+
+
+def get_acag_collection():
+    settings = get_settings()
+    db_name = getattr(settings, "mongo_db_pollution", "Pollution")
+    coll_name = getattr(settings, "mongo_collection_acag", "ACAG")
+    client = _get_client()
+    return client[db_name][coll_name]

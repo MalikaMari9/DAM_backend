@@ -12,6 +12,7 @@ from app.models.enums import AccountRole, DataDomain, UploadStatus
 from app.core.mongo import get_imhe_collection, get_openaq_collection
 from app.core.db import SessionLocal
 from app.core.config import get_settings
+from app.core.country_normalize import normalize_country_name as _shared_normalize_country_name
 from app.repositories.org_repo import get_org_by_id
 from app.repositories.upload_repo import (
     create_upload,
@@ -216,7 +217,7 @@ def _find_existing_keys(col, keys: list[tuple]) -> set[tuple]:
 
 
 def _normalize_country_name(value: str) -> str:
-    return " ".join(value.strip().lower().split())
+    return _shared_normalize_country_name(value)
 
 
 def _parse_optional_float(value: str | None):

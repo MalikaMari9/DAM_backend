@@ -24,6 +24,8 @@ class Settings(BaseModel):
     mongo_collection_imhe: str = "IMHE"
     mongo_db_pollution: str = "Pollution"
     mongo_collection_openaq: str = "OpenAQ"
+    mongo_collection_who: str = "WHO"
+    mongo_collection_acag: str = "ACAG"
 
 
 _settings: Optional[Settings] = None
@@ -54,5 +56,7 @@ def get_settings() -> Settings:
             mongo_collection_imhe=os.getenv("MONGO_COLLECTION_IMHE", "IMHE"),
             mongo_db_pollution=os.getenv("MONGO_DB_POLLUTION", "Pollution"),
             mongo_collection_openaq=os.getenv("MONGO_COLLECTION_OPENAQ", "OpenAQ"),
+            mongo_collection_who=os.getenv("MONGO_COLLECTION_WHO", "WHO"),
+            mongo_collection_acag=os.getenv("MONGO_COLLECTION_ACAG", "ACAG"),
         )
     return _settings

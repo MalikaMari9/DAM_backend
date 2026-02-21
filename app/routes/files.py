@@ -23,5 +23,6 @@ def upload_application_file_route(
     application_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    _account=Depends(require_admin),
 ):
     return save_application_file(db, application_id, file)
