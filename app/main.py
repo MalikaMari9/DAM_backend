@@ -11,6 +11,7 @@ from app.routes.health_imhe import router as health_imhe_router
 from app.routes.pollution_openaq import router as pollution_openaq_router
 from app.routes.pollution_who import router as pollution_who_router
 from app.routes.pollution_acag import router as pollution_acag_router
+from app.routes.announcements import router as announcements_router
 
 app = FastAPI()
 
@@ -39,3 +40,4 @@ app.include_router(health_imhe_router)
 app.include_router(pollution_openaq_router)
 app.include_router(pollution_who_router)
 app.include_router(pollution_acag_router)
+app.include_router(announcements_router)

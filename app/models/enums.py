@@ -2,7 +2,7 @@ import enum
 from sqlalchemy import Column, BigInteger, Text, TIMESTAMP, Boolean, Enum as SAEnum, ForeignKey
 from sqlalchemy.sql import func
 from app.models.base import Base
-
+from enum import Enum as PyEnum
 
 class AccountRole(enum.Enum):
     ADMIN = "ADMIN"
@@ -37,3 +37,8 @@ class UploadStatus(enum.Enum):
     RECEIVED = "RECEIVED"
     PROCESSED = "PROCESSED"
     FAILED = "FAILED"
+
+class AnnouncementType(str, PyEnum):
+    INFO = "INFO"
+    SUCCESS = "SUCCESS"
+    WARNING = "WARNING"
