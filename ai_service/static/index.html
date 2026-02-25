@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Air Quality & Health Risk Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>🌍 Air Quality & Health Risk</h1>
+        <p>AI-Powered PM2.5 Forecasting & Mortality Analysis</p>
+    </header>
+
+    <div class="controls">
+        <div class="control-group">
+            <label>Select Country</label>
+            <select id="countrySelect"></select>
+        </div>
+        <div class="control-group">
+            <label>Target Year: <span id="yearValue">2027</span></label>
+            <input type="range" id="yearRange" min="2020" max="2030" value="2027">
+        </div>
+        <button onclick="analyzeRisk()">Analyze Risk</button>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading" class="hidden">
+        <div class="spinner"></div>
+        <p>Crunching numbers with XGBoost...</p>
+    </div>
+
+    <!-- Results Section -->
+    <div id="results" class="hidden">
+        
+        <!-- Top Cards -->
+        <div class="cards-grid">
+            <div class="card result-card">
+                <h3>PM2.5 Forecast</h3>
+                <div class="big-number" id="pm25Val">--</div>
+                <div class="sub-text">µg/m³ (Annual Mean)</div>
+                <div class="badge" id="aqiBadge">--</div>
+            </div>
+            
+            <div class="card result-card">
+                <h3>Attributable Deaths</h3>
+                <div class="big-number" id="deathsVal">--</div>
+                <div class="sub-text">Estimated Total</div>
+                <div class="range-text" id="deathsRange">--</div>
+            </div>
+
+            <div class="card result-card">
+                <h3>Most Vulnerable</h3>
+                <div class="big-number" id="vulnGroup">--</div>
+                <div class="sub-text">Age Group</div>
+                <div class="range-text" id="vulnPct">--</div>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="charts-grid">
+            <div class="card chart-card">
+                <h3>PM2.5 Trend (2020-2030)</h3>
+                <canvas id="pm25Chart"></canvas>
+            </div>
+            <div class="card chart-card">
+                <h3>Deaths by Disease</h3>
+                <canvas id="diseaseChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Detailed Tables -->
+        <div class="tables-grid">
+            <div class="card">
+                <h3>Disease Breakdown</h3>
+                <table id="diseaseTable">
+                    <thead>
+                        <tr>
+                            <th>Disease</th>
+                            <th>Category</th>
+                            <th>Deaths</th>
+                            <th>AF %</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h3>Age Group Risk</h3>
+                <table id="ageTable">
+                    <thead>
+                        <tr>
+                            <th>Group</th>
+                            <th>Deaths</th>
+                            <th>% Share</th>
+                            <th>Vuln. Factor</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+let pm25ChartInstance = null;
+let diseaseChartInstance = null;
+
+// Initialize
+async function init() {
+    const res = await fetch('/api/countries');
+    const data = await res.json();
+    
+    const select = document.getElementById('countrySelect');
+    data.countries.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.name;
+        opt.textContent = c.name;
+        select.appendChild(opt);
+    });
+
+    // Default selection
+    select.value = "Myanmar";
+    document.getElementById('yearRange').addEventListener('input', (e) => {
+        document.getElementById('yearValue').textContent = e.target.value;
+    });
+}
+
+async function analyzeRisk() {
+    const country = document.getElementById('countrySelect').value;
+    const year = parseInt(document.getElementById('yearRange').value);
+    
+    document.getElementById('loading').classList.remove('hidden');
+    document.getElementById('results').classList.add('hidden');
+
+    try {
+        const res = await fetch('/api/health-risk', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({country, target_year: year})
+        });
+        
+        const data = await res.json();
+        renderResults(data);
+    } catch (err) {
+        alert("Error analyzing risk: " + err);
+    } finally {
+        document.getElementById('loading').classList.add('hidden');
+    }
+}
+
+function renderResults(data) {
+    document.getElementById('results').classList.remove('hidden');
+
+    // 1. Cards
+    const pm = data.pm25_forecast.predicted_pm25;
+    document.getElementById('pm25Val').textContent = pm.toFixed(1);
+    
+    const aqi = data.aqi_category;
+    const badge = document.getElementById('aqiBadge');
+    badge.textContent = aqi.level;
+    badge.style.backgroundColor = aqi.color;
+
+    document.getElementById('deathsVal').textContent = data.total_attributed_deaths.toLocaleString();
+    document.getElementById('deathsRange').textContent = 
+        `${data.total_ci_lower.toLocaleString()} – ${data.total_ci_upper.toLocaleString()} (95% CI)`;
+
+    if (data.age_groups.length > 0) {
+        // Sort by deaths desc to find most vulnerable
+        const sortedAges = [...data.age_groups].sort((a,b) => b.attributed_deaths - a.attributed_deaths);
+        const top = sortedAges[0];
+        document.getElementById('vulnGroup').textContent = top.age_group.split(' ')[0]; // just 'Elderly' etc.
+        document.getElementById('vulnPct').textContent = `${top.percentage}% of deaths`;
+    } else {
+        document.getElementById('vulnGroup').textContent = "N/A";
+        document.getElementById('vulnPct').textContent = "--";
+    }
+
+    // 2. Charts
+    renderPM25Chart(data.pm25_forecast.prediction_path, data.target_year);
+    renderDiseaseChart(data.diseases);
+
+    // 3. Tables
+    const dBody = document.querySelector('#diseaseTable tbody');
+    dBody.innerHTML = '';
+    data.diseases.slice(0, 5).forEach(d => {
+        dBody.innerHTML += `
+            <tr>
+                <td>${d.disease}</td>
+                <td><span class="tag">${d.category}</span></td>
+                <td>${d.attributed_deaths.toLocaleString()}</td>
+                <td>${(d.attributable_fraction * 100).toFixed(1)}%</td>
+            </tr>
+        `;
+    });
+
+    const aBody = document.querySelector('#ageTable tbody');
+    aBody.innerHTML = '';
+    data.age_groups.forEach(g => {
+        aBody.innerHTML += `
+            <tr>
+                <td>${g.age_group}</td>
+                <td>${g.attributed_deaths.toLocaleString()}</td>
+                <td>${g.percentage}%</td>
+                <td>${g.vulnerability_multiplier}x</td>
+            </tr>
+        `;
+    });
+}
+
+function renderPM25Chart(pathData, targetYear) {
+    const ctx = document.getElementById('pm25Chart').getContext('2d');
+    const years = Object.keys(pathData).sort();
+    const values = years.map(y => pathData[y]);
+
+    if(pm25ChartInstance) pm25ChartInstance.destroy();
+
+    pm25ChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: years,
+            datasets: [{
+                label: 'PM2.5 (µg/m³)',
+                data: values,
+                borderColor: '#3B82F6',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                tension: 0.4,
+                fill: true,
+                pointRadius: years.map(y => parseInt(y) === targetYear ? 6 : 3),
+                pointBackgroundColor: years.map(y => parseInt(y) === targetYear ? '#EF4444' : '#3B82F6')
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {legend: {display: false}},
+            scales: {
+                y: {beginAtZero: false, grid: {color: '#333'}},
+                x: {grid: {display: false}}
+            }
+        }
+    });
+}
+
+function renderDiseaseChart(diseases) {
+    const ctx = document.getElementById('diseaseChart').getContext('2d');
+    const top5 = diseases.slice(0, 5);
+    
+    if(diseaseChartInstance) diseaseChartInstance.destroy();
+
+    diseaseChartInstance = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: top5.map(d => d.disease),
+            datasets: [{
+                data: top5.map(d => d.attributed_deaths),
+                backgroundColor: ['#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {position: 'right', labels: {color: '#ccc'}}
+            }
+        }
+    });
+}
+
+init();
+</script>
+
+</body>
+</html>

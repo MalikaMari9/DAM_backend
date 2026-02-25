@@ -27,3 +27,5 @@ Thumbs.db
 *.key
 
 uploads/
+ai_service/data/health_ihme_clean.json
+
