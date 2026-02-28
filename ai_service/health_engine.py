@@ -38,6 +38,31 @@ AGE_NAME_TO_START = {
 }
 
 
+# Country name aliases: maps parser names to IHME/GBD names
+COUNTRY_ALIASES = {
+    'Vietnam': 'Viet Nam',
+    'Laos': "Lao People's Democratic Republic",
+    'Brunei': 'Brunei Darussalam',
+    'South Korea': 'Republic of Korea',
+    'North Korea': "Democratic People's Republic of Korea",
+    'Iran': 'Iran (Islamic Republic of)',
+    'Syria': 'Syrian Arab Republic',
+    'Russia': 'Russian Federation',
+    'Bolivia': 'Bolivia (Plurinational State of)',
+    'Venezuela': 'Venezuela (Bolivarian Republic of)',
+    'Tanzania': 'United Republic of Tanzania',
+    'Moldova': 'Republic of Moldova',
+    'Czech Republic': 'Czechia',
+    'Ivory Coast': "Cote d'Ivoire",
+    'Congo': 'Democratic Republic of the Congo',
+}
+
+
+def _normalize_country(name: str) -> str:
+    """Normalize country name using aliases."""
+    return COUNTRY_ALIASES.get(name, name)
+
+
 class HealthRiskEngine:
     """Health risk calculation engine using IER curves + IHME data."""
 
@@ -74,20 +99,24 @@ class HealthRiskEngine:
         """Get raw IHME records for a country efficiently."""
         if not self.ihme_raw_path or not Path(self.ihme_raw_path).exists():
             return None
-            
+
+        norm = _normalize_country(country)
+        search_names = {country.lower(), norm.lower()}
+
         records = []
         try:
             with open(self.ihme_raw_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 for r in data:
                     loc = r.get('location_name', '')
-                    if country.lower() in loc.lower() or loc.lower() in country.lower():
+                    loc_l = loc.lower()
+                    if any(s in loc_l or loc_l in s for s in search_names):
                         records.append(r)
-                del data # free memory immediately
+                del data
         except MemoryError:
-            print("  [WARN] Hit MemoryError loading IHME dataset. Flowing back to baselines.")
+            print("  [WARN] Hit MemoryError loading IHME dataset. Falling back to baselines.")
             return None
-            
+
         return records if records else None
 
     def calculate(self, country: str, pm25_level: float, target_year: int):
@@ -209,13 +238,27 @@ class HealthRiskEngine:
 
     def _calc_aggregated(self, result, country, pm25, target_year):
         """Fallback: use aggregated baselines."""
+        norm = _normalize_country(country)
         baseline = self.baselines.get(country, {}).get(str(target_year))
         if not baseline:
-            # Fuzzy match
+            baseline = self.baselines.get(norm, {}).get(str(target_year))
+        if not baseline:
+            search_names = {country.lower(), norm.lower()}
             for c in self.baselines:
-                if country.lower() in c.lower() or c.lower() in country.lower():
+                c_lower = c.lower()
+                if any(s in c_lower or c_lower in s for s in search_names):
                     baseline = self.baselines[c].get(str(target_year))
                     if baseline:
+                        break
+
+        # Fallback: try nearest available year
+        if not baseline:
+            for c_key in [country, norm]:
+                year_data = self.baselines.get(c_key, {})
+                if year_data:
+                    available_years = sorted(year_data.keys(), key=lambda y: abs(int(y) - target_year))
+                    if available_years:
+                        baseline = year_data[available_years[0]]
                         break
 
         if not baseline:

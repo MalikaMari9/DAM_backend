@@ -14,7 +14,7 @@ class ChatRequest(BaseModel):
 
 @router.post("/chat")
 async def chat(req: ChatRequest):
-    base = os.getenv("AI_MODEL_BASE_URL", "http://127.0.0.1:9000")
+    base = os.getenv("AI_MODEL_BASE_URL", "http://127.0.0.1:9010")
     url = f"{base}/api/chat"
     try:
         async with httpx.AsyncClient(timeout=60) as client:

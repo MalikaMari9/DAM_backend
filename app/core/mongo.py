@@ -20,6 +20,14 @@ def get_imhe_collection():
     return client[db_name][coll_name]
 
 
+def get_imhe_pred_collection():
+    settings = get_settings()
+    db_name = getattr(settings, "mongo_db_health", "Health")
+    coll_name = getattr(settings, "mongo_collection_imhe_pred", "IMHEPred")
+    client = _get_client()
+    return client[db_name][coll_name]
+
+
 def get_openaq_collection():
     settings = get_settings()
     db_name = getattr(settings, "mongo_db_pollution", "Pollution")
@@ -40,5 +48,13 @@ def get_acag_collection():
     settings = get_settings()
     db_name = getattr(settings, "mongo_db_pollution", "Pollution")
     coll_name = getattr(settings, "mongo_collection_acag", "ACAG")
+    client = _get_client()
+    return client[db_name][coll_name]
+
+
+def get_acag_pred_collection():
+    settings = get_settings()
+    db_name = getattr(settings, "mongo_db_pollution", "Pollution")
+    coll_name = getattr(settings, "mongo_collection_acag_pred", "ACAGPred")
     client = _get_client()
     return client[db_name][coll_name]

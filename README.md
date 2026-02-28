@@ -27,6 +27,16 @@ MAX_UPLOAD_BYTES=10485760
 # Frontend for reset links
 FRONTEND_BASE_URL=http://localhost:8080
 
+# MongoDB
+MONGO_URI=mongodb://localhost:27017
+MONGO_DB_POLLUTION=Pollution
+MONGO_COLLECTION_ACAG=ACAG
+MONGO_COLLECTION_ACAG_PRED=ACAGPred
+ACAG_PRED_START_YEAR=2020
+
+# AI chat upstream (proxy target)
+AI_MODEL_BASE_URL=http://127.0.0.1:9010
+
 # SMTP (Gmail App Password)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
@@ -41,6 +51,29 @@ uvicorn app.main:app --reload
 ```
 
 API docs: `http://127.0.0.1:8000/docs`
+
+## AI Integration
+
+Frontend remains unchanged and still calls:
+- `POST /ai/chat` on backend
+
+Backend forwards that request to:
+- `POST /api/chat` on AI service (`backend/ai_service`)
+
+Run AI service in a separate terminal:
+```powershell
+cd backend/ai_service
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python app.py
+```
+
+Then run backend API:
+```powershell
+cd backend
+uvicorn app.main:app --reload
+```
 
 ## Database Notes
 ### Password reset table (required)
@@ -90,6 +123,9 @@ pip install "bcrypt==4.0.1"
 **Admin**
 - `POST /admin/users/admin` (admin)
 - `POST /admin/users/org` (admin)
+
+**AI**
+- `POST /ai/chat` (proxy to AI service)
 
 ## Tests
 ```powershell
