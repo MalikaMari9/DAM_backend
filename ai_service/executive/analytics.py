@@ -8,7 +8,11 @@ year-over-year comparisons over arbitrary country lists.
 from __future__ import annotations
 
 from .predict_pm25 import forecast_pm25, get_predictor
-from .predict_health import predict_deaths, predict_attributable_deaths
+from .predict_health import (
+    predict_deaths,
+    predict_attributable_deaths,
+    predict_attributable_dalys,
+)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -133,18 +137,21 @@ def lowest_health_burden(
 ) -> list[dict]:
     """Rank countries by health burden (lowest first).
 
-    metric: "deaths" or "dalys" (DALYs approximated as deaths × 12.5).
+    metric: "deaths" or "dalys" (DALYs from IHME + IER when available).
     """
     results = []
     for c in countries:
         try:
             pm25 = forecast_pm25(c, year)
-            deaths, rate = predict_deaths(c, year, pm25)
+            deaths, _ = predict_deaths(c, year, pm25)
             if deaths <= 0:
                 continue  # skip missing data
             value = deaths
             if metric.lower() == "dalys":
-                value = deaths * 12.5  # WHO DALY approximation
+                daly_result = predict_attributable_dalys(c, year, pm25)
+                value = daly_result.get("dalys", 0)
+                if value <= 0:
+                    continue
 
             results.append({
                 "country": c,

@@ -383,13 +383,28 @@ class QueryParser:
             if self.model is not None:
                 self.intent_embeddings[intent] = self.model.encode(examples, convert_to_tensor=True)
 
-        # Build country lookup
+        # Build country lookup safely: exact matches first, then synonyms,
+        # then partials that do not overwrite those stronger matches.
         self.country_map = {}
         for c in available_countries:
             self.country_map[c.lower()] = c
-            parts = c.lower().split()
+
+        try:
+            from region_resolver import COUNTRY_SYNONYMS
+            for syn, canon in COUNTRY_SYNONYMS.items():
+                if canon in available_countries and syn.lower() not in self.country_map:
+                    self.country_map[syn.lower()] = canon
+                # Reverse mapping if the dataset uses the synonym form but queries use the canonical label.
+                if syn in available_countries and canon.lower() not in self.country_map:
+                    self.country_map[canon.lower()] = syn
+        except ImportError:
+            pass
+
+        for c in available_countries:
+            parts = re.split(r'[, ]+', c.lower())
             for part in parts:
-                if len(part) > 3:
+                part = part.strip()
+                if len(part) > 3 and part not in self.country_map:
                     self.country_map[part] = c
 
         print(f"  [OK] Query parser ready ({len(INTENT_RULES)} rule intents, {len(available_countries)} countries)")

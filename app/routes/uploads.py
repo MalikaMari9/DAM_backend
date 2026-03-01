@@ -15,9 +15,14 @@ from app.controllers.upload_controller import (
     confirm_pollution_csv_upload,
     list_pollution_csv_dupes,
     create_pollution_record_upload,
+    create_acag_csv_validation,
+    confirm_acag_csv_upload,
+    list_acag_csv_dupes,
+    create_acag_record_upload,
     list_upload_records,
     update_upload_record,
     update_pollution_record,
+    update_acag_record,
     delete_upload_with_records,
 )
 from app.schemas.upload_schema import (
@@ -26,9 +31,11 @@ from app.schemas.upload_schema import (
     UploadUpdateStatus,
     HealthIMHERecordManual,
     PollutionOpenAQRecordManual,
+    PollutionACAGRecordManual,
     UploadRecordList,
     UploadRecordUpdate,
     PollutionOpenAQRecordUpdate,
+    PollutionACAGRecordUpdate,
 )
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
@@ -118,6 +125,36 @@ def upload_pollution_csv_confirm(
     return confirm_pollution_csv_upload(db, account, token)
 
 
+@router.post("/pollution/acag/csv/validate")
+async def upload_acag_csv_validate(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    account=Depends(require_org),
+):
+    if file.filename and not any(file.filename.lower().endswith(ext) for ext in (".csv", ".xlsx", ".xls", ".json")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only CSV, Excel (.xlsx/.xls), or JSON files are supported for ACAG uploads.",
+        )
+    settings = get_settings()
+    file_bytes = await _read_upload_bytes(file, settings.max_upload_bytes)
+    return create_acag_csv_validation(
+        db,
+        account,
+        file_bytes=file_bytes,
+        filename=file.filename or "acag.csv",
+    )
+
+
+@router.post("/pollution/acag/csv/confirm", response_model=UploadRead)
+def upload_acag_csv_confirm(
+    token: str,
+    db: Session = Depends(get_db),
+    account=Depends(require_org),
+):
+    return confirm_acag_csv_upload(db, account, token)
+
+
 @router.get("/health/csv/dupes")
 def upload_health_csv_dupes(
     token: str,
@@ -140,6 +177,17 @@ def upload_pollution_csv_dupes(
     return list_pollution_csv_dupes(db, account, token, limit=limit, offset=offset)
 
 
+@router.get("/pollution/acag/csv/dupes")
+def upload_acag_csv_dupes(
+    token: str,
+    limit: int = 5,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    account=Depends(require_org),
+):
+    return list_acag_csv_dupes(db, account, token, limit=limit, offset=offset)
+
+
 @router.post("/health/record", response_model=UploadRead)
 def upload_health_record(
     payload: HealthIMHERecordManual,
@@ -156,6 +204,15 @@ def upload_pollution_record(
     account=Depends(require_org),
 ):
     return create_pollution_record_upload(db, account, payload)
+
+
+@router.post("/pollution/acag/record", response_model=UploadRead)
+def upload_acag_record(
+    payload: PollutionACAGRecordManual,
+    db: Session = Depends(get_db),
+    account=Depends(require_org),
+):
+    return create_acag_record_upload(db, account, payload)
 
 
 @router.get("", response_model=list[UploadRead])
@@ -207,6 +264,17 @@ def update_pollution_record_route(
     account=Depends(get_current_account),
 ):
     return update_pollution_record(db, account, upload_id, record_id, payload)
+
+
+@router.patch("/{upload_id}/acag-records/{record_id}")
+def update_acag_record_route(
+    upload_id: int,
+    record_id: str,
+    payload: PollutionACAGRecordUpdate,
+    db: Session = Depends(get_db),
+    account=Depends(get_current_account),
+):
+    return update_acag_record(db, account, upload_id, record_id, payload)
 
 
 @router.delete("/{upload_id}")

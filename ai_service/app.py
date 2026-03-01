@@ -241,6 +241,7 @@ async def chat_endpoint(req: ChatRequest):
     from executive.predict_pm25 import forecast_pm25 as exec_forecast, pm25_change_vs_last_year, pm25_change
     from executive.predict_health import (
         predict_attributable_deaths, predict_death_rate,
+        predict_attributable_dalys,
         top_diseases as exec_top_diseases, compare_health as exec_compare,
         predict_deaths as exec_predict_deaths,
     )
@@ -402,27 +403,25 @@ async def chat_endpoint(req: ChatRequest):
             }
 
         # ═════════════════════════════════════════════════════════
-        #  HEALTH_DALYS (fallback to deaths)
+        #  HEALTH_DALYS
         # ═════════════════════════════════════════════════════════
         if intent == "HEALTH_DALYS":
             if not country:
                 country = "Myanmar"  # fallback
-            result = predict_attributable_deaths(country, year)
+            result = predict_attributable_dalys(country, year)
 
-            # Bug E: check for zero deaths
-            if result.get('deaths', 0) == 0:
+            if result.get('dalys', 0) == 0:
                 return {
                     'intent': intent,
                     'answer': (
-                        f"No health impact data is available for {country} in {year}.\n"
-                        f"This may be due to missing baseline health data for this country.\n\n"
+                        f"No DALY health impact data is available for {country} in {year}.\n"
+                        f"This may be due to missing DALY baseline health data for this country.\n\n"
                         f"Try a different country, e.g.: 'What is the predicted DALYs due to PM2.5 in Myanmar?'"
                     ),
-                    'error': 'no_health_data',
+                    'error': 'no_daly_data',
                     'parsed': parsed,
                 }
 
-            result["dalys_available"] = False
             answer = format_output("health_dalys", result)
             return {
                 'intent': intent,

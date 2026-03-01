@@ -57,6 +57,12 @@ class PollutionOpenAQRecordManual(BaseModel):
     coverage_percent: float | None = None
 
 
+class PollutionACAGRecordManual(BaseModel):
+    year: int
+    population_weighted_pm25: float
+    geographic_mean_pm25: float
+
+
 class UploadRecordList(BaseModel):
     total: int
     items: list[dict]
@@ -89,3 +95,9 @@ class PollutionOpenAQRecordUpdate(BaseModel):
     coverage_percent: float | None = None
     sensor_id: int | None = None
     location_id: int | None = None
+
+
+class PollutionACAGRecordUpdate(BaseModel):
+    year: int
+    population_weighted_pm25: float
+    geographic_mean_pm25: float

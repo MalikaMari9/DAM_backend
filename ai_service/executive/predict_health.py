@@ -112,6 +112,40 @@ def predict_attributable_deaths(
     }
 
 
+def predict_attributable_dalys(
+    country: str, year: int, pm25_value: float | None = None
+) -> dict:
+    """Full attributable-DALYs result with CI bounds and disease breakdown."""
+    if pm25_value is None:
+        pm25_value = forecast_pm25(country, year)
+
+    engine = _get_engine()
+    result = engine.calculate_dalys(country, pm25_value, year)
+
+    dalys = float(result.get("total_attributed_dalys", result.get("total_attributed", 0)))
+    ci_low = float(result.get("total_ci_lower", 0))
+    ci_high = float(result.get("total_ci_upper", 0))
+
+    diseases = []
+    for d in result.get("diseases", []):
+        diseases.append({
+            "disease": d["disease"],
+            "dalys": round(d.get("attributed", 0), 0),
+            "category": d.get("category", ""),
+        })
+
+    return {
+        "country": country,
+        "year": year,
+        "pm25": round(pm25_value, 2),
+        "dalys": round(dalys, 0),
+        "ci_low": round(ci_low, 0),
+        "ci_high": round(ci_high, 0),
+        "diseases": diseases,
+        "dalys_available": dalys > 0,
+    }
+
+
 def predict_death_rate(
     country: str, year: int, deaths_total: float | None = None
 ) -> dict:

@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from app.models.account_model import Account
 from app.models.enums import AccountRole, DataDomain, UploadStatus
-from app.core.mongo import get_imhe_collection, get_openaq_collection
+from app.core.mongo import get_acag_collection, get_imhe_collection, get_openaq_collection
 from app.core.db import SessionLocal
 from app.core.config import get_settings
 from app.core.country_normalize import normalize_country_name as _shared_normalize_country_name
@@ -26,8 +26,10 @@ from app.schemas.upload_schema import (
     UploadCreate,
     UploadUpdateStatus,
     HealthIMHERecordManual,
+    PollutionACAGRecordManual,
     PollutionOpenAQRecordManual,
     UploadRecordUpdate,
+    PollutionACAGRecordUpdate,
     PollutionOpenAQRecordUpdate,
 )
 
@@ -62,6 +64,20 @@ POLLUTION_REQUIRED_FIELDS = [
     "year",
     "value",
 ]
+
+ACAG_FIELD_REGION = "Region"
+ACAG_FIELD_YEAR = "Year"
+ACAG_FIELD_POP_WEIGHTED = "Population-Weighted PM2"
+ACAG_FIELD_GEO_MEAN = "Geographic-Mean PM2"
+ACAG_CSV_YEAR_ALIASES = ("year", "Year")
+ACAG_CSV_POP_WEIGHTED_ALIASES = (
+    "population_weighted_pm25",
+    "Population-Weighted PM2",
+)
+ACAG_CSV_GEO_MEAN_ALIASES = (
+    "geographic_mean_pm25",
+    "Geographic-Mean PM2",
+)
 
 _SUPPORTED_UPLOAD_EXTS = {".csv", ".xlsx", ".xls", ".json"}
 
@@ -294,6 +310,13 @@ def _require_fields(rows: list[dict], required: list[str]):
         raise ValueError(f"File is missing required columns: {', '.join(missing)}")
 
 
+def _row_value(row: dict, aliases: tuple[str, ...]):
+    for key in aliases:
+        if key in row:
+            return row.get(key)
+    return None
+
+
 def _parse_imhe_rows(rows: list[dict], expected_country: str, row_offset: int) -> tuple[list[dict], str]:
     _require_fields(rows, IMHE_REQUIRED_FIELDS)
     docs: list[dict] = []
@@ -399,6 +422,39 @@ def _parse_pollution_rows(rows: list[dict], expected_country: str, row_offset: i
     return docs, location_label or expected_country
 
 
+def _parse_acag_rows(rows: list[dict], expected_country: str, row_offset: int) -> tuple[list[dict], str]:
+    if not rows:
+        raise ValueError("File contains no data rows.")
+
+    docs: list[dict] = []
+    for idx, row in enumerate(rows, start=row_offset):
+        year_value = _row_value(row, ACAG_CSV_YEAR_ALIASES)
+        pop_weighted_value = _row_value(row, ACAG_CSV_POP_WEIGHTED_ALIASES)
+        geo_mean_value = _row_value(row, ACAG_CSV_GEO_MEAN_ALIASES)
+
+        try:
+            doc = {
+                ACAG_FIELD_REGION: expected_country,
+                ACAG_FIELD_YEAR: _parse_required_int(year_value, "year", idx),
+                ACAG_FIELD_POP_WEIGHTED: _parse_required_float(
+                    pop_weighted_value,
+                    "population_weighted_pm25",
+                    idx,
+                ),
+                ACAG_FIELD_GEO_MEAN: _parse_required_float(
+                    geo_mean_value,
+                    "geographic_mean_pm25",
+                    idx,
+                ),
+            }
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"Row {idx}: invalid numeric value ({exc}).") from exc
+
+        docs.append(doc)
+
+    return docs, expected_country
+
+
 def _pollution_key_tuple(doc: dict) -> tuple:
     return (
         doc.get("country_name"),
@@ -440,6 +496,30 @@ def _find_existing_pollution_keys(col, keys: list[tuple]) -> set[tuple]:
                     doc.get("year"),
                 )
             )
+    return existing
+
+
+def _acag_key_tuple(doc: dict) -> tuple:
+    region = str(doc.get(ACAG_FIELD_REGION) or "").strip()
+    return (_normalize_country_name(region), doc.get(ACAG_FIELD_YEAR))
+
+
+def _find_existing_acag_keys(col, country_name: str, years: list[int]) -> set[tuple]:
+    if not years:
+        return set()
+    expected_norm = _normalize_country_name(country_name)
+    cursor = col.find(
+        {ACAG_FIELD_YEAR: {"$in": sorted(set(int(year) for year in years))}},
+        {ACAG_FIELD_REGION: 1, ACAG_FIELD_YEAR: 1},
+    )
+    existing: set[tuple] = set()
+    for doc in cursor:
+        region = str(doc.get(ACAG_FIELD_REGION) or "").strip()
+        if not region:
+            continue
+        if _normalize_country_name(region) != expected_norm:
+            continue
+        existing.add((expected_norm, doc.get(ACAG_FIELD_YEAR)))
     return existing
 
 
@@ -537,6 +617,34 @@ def _parse_imhe_json(file_bytes: bytes, expected_country: str) -> tuple[list[dic
 def _parse_pollution_json(file_bytes: bytes, expected_country: str) -> tuple[list[dict], str]:
     rows = _rows_from_json(file_bytes)
     return _parse_pollution_rows(rows, expected_country, row_offset=1)
+
+
+def _parse_acag_csv(file_bytes: bytes, expected_country: str) -> tuple[list[dict], str]:
+    text = file_bytes.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise ValueError("CSV file is missing headers.")
+    rows = list(reader)
+    if not rows:
+        raise ValueError("CSV contains no data rows.")
+    return _parse_acag_rows(rows, expected_country, row_offset=2)
+
+
+def _parse_acag_json(file_bytes: bytes, expected_country: str) -> tuple[list[dict], str]:
+    rows = _rows_from_json(file_bytes)
+    return _parse_acag_rows(rows, expected_country, row_offset=1)
+
+
+def _parse_acag_upload(file_bytes: bytes, filename: str, expected_country: str) -> tuple[list[dict], str]:
+    ext = _get_file_ext(filename)
+    if ext and ext not in _SUPPORTED_UPLOAD_EXTS:
+        raise ValueError("Unsupported file type. Use CSV, Excel, or JSON.")
+    if ext == ".json":
+        return _parse_acag_json(file_bytes, expected_country)
+    if ext in {".xlsx", ".xls"}:
+        rows = _rows_from_excel(file_bytes, ext)
+        return _parse_acag_rows(rows, expected_country, row_offset=2)
+    return _parse_acag_csv(file_bytes, expected_country)
 
 
 def _parse_imhe_excel(file_bytes: bytes, expected_country: str, ext: str) -> tuple[list[dict], str]:
@@ -762,6 +870,77 @@ def create_pollution_csv_validation(
     }
 
 
+def create_acag_csv_validation(
+    db: Session,
+    account: Account,
+    file_bytes: bytes,
+    filename: str,
+):
+    if account.role != AccountRole.ORG or not account.org_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Organization access required")
+    org = get_org_by_id(db, account.org_id)
+    if not org:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    if org.data_domain != DataDomain.POLLUTION:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pollution organization access required")
+
+    settings = get_settings()
+    if len(file_bytes) > settings.max_upload_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large. Max size is {settings.max_upload_bytes} bytes.",
+        )
+
+    docs, _location = _parse_acag_upload(file_bytes, filename, org.country)
+    col = get_acag_collection()
+    keys = [_acag_key_tuple(doc) for doc in docs]
+
+    existing_keys = _find_existing_acag_keys(
+        col,
+        country_name=org.country,
+        years=[int(doc[ACAG_FIELD_YEAR]) for doc in docs],
+    )
+    seen: set[tuple] = set()
+    dupes: list[tuple] = []
+    new_docs: list[dict] = []
+
+    for doc in docs:
+        key = _acag_key_tuple(doc)
+        if key in existing_keys or key in seen:
+            dupes.append(key)
+        else:
+            seen.add(key)
+            new_docs.append(doc)
+
+    token = str(ObjectId())
+    _cache_cleanup()
+    _CSV_VALIDATION_CACHE[token] = {
+        "created_at": datetime.utcnow().timestamp(),
+        "docs": new_docs,
+        "filename": filename,
+        "org_id": org.org_id,
+        "country": org.country,
+        "dupes": dupes,
+        "domain": "acag",
+    }
+    dupe_samples = [
+        {
+            "country_name": k[0],
+            "year": k[1],
+        }
+        for k in dupes[:5]
+    ]
+    return {
+        "token": token,
+        "total_rows": len(docs),
+        "dupe_rows": len(dupes),
+        "new_rows": len(new_docs),
+        "dupe_samples": dupe_samples,
+        "dupe_total": len(dupes),
+        "token_expires_seconds": _CSV_CACHE_MAX_AGE_SECONDS,
+    }
+
+
 def list_csv_dupes(db: Session, account: Account, token: str, limit: int, offset: int):
     _cache_cleanup()
     payload = _CSV_VALIDATION_CACHE.get(token)
@@ -808,6 +987,29 @@ def list_pollution_csv_dupes(db: Session, account: Account, token: str, limit: i
             "location_name": k[1],
             "pollutant": k[2],
             "year": k[3],
+        }
+        for k in slice_dupes
+    ]
+    return {"total": total, "items": items}
+
+
+def list_acag_csv_dupes(db: Session, account: Account, token: str, limit: int, offset: int):
+    _cache_cleanup()
+    payload = _CSV_VALIDATION_CACHE.get(token)
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload token expired")
+    if account.role != AccountRole.ORG or not account.org_id or account.org_id != payload["org_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+    if payload.get("domain") != "acag":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token is not for ACAG uploads")
+
+    dupes = payload.get("dupes", [])
+    total = len(dupes)
+    slice_dupes = dupes[int(offset): int(offset) + int(limit)]
+    items = [
+        {
+            "country_name": k[0],
+            "year": k[1],
         }
         for k in slice_dupes
     ]
@@ -880,6 +1082,42 @@ def confirm_pollution_csv_upload(db: Session, account: Account, token: str):
         data_domain=DataDomain.POLLUTION,
         country=payload["country"],
         data=UploadCreate(mongo_collection="OpenAQ", mongo_ref_id=batch_id),
+    )
+    update_upload_status(db, upload, UploadUpdateStatus(status=UploadStatus.PROCESSED))
+    return upload
+
+
+def confirm_acag_csv_upload(db: Session, account: Account, token: str):
+    _cache_cleanup()
+    payload = _CSV_VALIDATION_CACHE.pop(token, None)
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload token expired")
+    if account.role != AccountRole.ORG or not account.org_id or account.org_id != payload["org_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+    if payload.get("domain") != "acag":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token is not for ACAG uploads")
+
+    col = get_acag_collection()
+    batch_id = str(ObjectId())
+    batch_obj = ObjectId(batch_id)
+    docs = payload["docs"]
+    for doc in docs:
+        doc["_source_batch"] = batch_obj
+        doc["_source_file"] = payload["filename"]
+
+    if docs:
+        try:
+            col.insert_many(docs, ordered=False)
+        except DuplicateKeyError:
+            pass
+
+    upload = create_upload(
+        db,
+        account_id=account.account_id,
+        org_id=payload["org_id"],
+        data_domain=DataDomain.POLLUTION,
+        country=payload["country"],
+        data=UploadCreate(mongo_collection="ACAG", mongo_ref_id=batch_id),
     )
     update_upload_status(db, upload, UploadUpdateStatus(status=UploadStatus.PROCESSED))
     return upload
@@ -1019,6 +1257,53 @@ def create_pollution_record_upload(db: Session, account: Account, record: Pollut
     return upload
 
 
+def create_acag_record_upload(db: Session, account: Account, record: PollutionACAGRecordManual):
+    if account.role != AccountRole.ORG or not account.org_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Organization access required")
+    org = get_org_by_id(db, account.org_id)
+    if not org:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    if org.data_domain != DataDomain.POLLUTION:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pollution organization access required")
+
+    current_year = datetime.utcnow().year
+    if record.year < 1900 or record.year > current_year + 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"year must be between 1900 and {current_year + 3}",
+        )
+
+    col = get_acag_collection()
+    key = (_normalize_country_name(org.country), int(record.year))
+    if key in _find_existing_acag_keys(col, country_name=org.country, years=[record.year]):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Record already exists for the same country/year.",
+        )
+
+    batch_id = str(ObjectId())
+    doc = {
+        ACAG_FIELD_REGION: org.country,
+        ACAG_FIELD_YEAR: record.year,
+        ACAG_FIELD_POP_WEIGHTED: record.population_weighted_pm25,
+        ACAG_FIELD_GEO_MEAN: record.geographic_mean_pm25,
+        "_source_batch": ObjectId(batch_id),
+        "_source_file": "manual",
+    }
+    col.insert_one(doc)
+
+    upload = create_upload(
+        db,
+        account_id=account.account_id,
+        org_id=org.org_id,
+        data_domain=org.data_domain,
+        country=org.country,
+        data=UploadCreate(mongo_collection="ACAG", mongo_ref_id=batch_id),
+    )
+    update_upload_status(db, upload, UploadUpdateStatus(status=UploadStatus.PROCESSED))
+    return upload
+
+
 def list_upload_records(db: Session, account: Account, upload_id: int, limit: int, offset: int):
     upload = get_upload_by_id(db, upload_id)
     if not upload:
@@ -1029,6 +1314,9 @@ def list_upload_records(db: Session, account: Account, upload_id: int, limit: in
     batch_id = ObjectId(upload.mongo_ref_id)
     if upload.mongo_collection == "OpenAQ":
         col = get_openaq_collection()
+        query = {"_source_batch": batch_id}
+    elif upload.mongo_collection == "ACAG":
+        col = get_acag_collection()
         query = {"_source_batch": batch_id}
     else:
         col = get_imhe_collection()
@@ -1165,6 +1453,57 @@ def update_pollution_record(
     return {"status": "ok"}
 
 
+def update_acag_record(
+    db: Session,
+    account: Account,
+    upload_id: int,
+    record_id: str,
+    payload: PollutionACAGRecordUpdate,
+):
+    upload = get_upload_by_id(db, upload_id)
+    if not upload:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found")
+    if account.role == AccountRole.ORG and account.org_id != upload.org_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+    if upload.mongo_collection != "ACAG":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not an ACAG upload")
+
+    current_year = datetime.utcnow().year
+    if payload.year < 1900 or payload.year > current_year + 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"year must be between 1900 and {current_year + 3}",
+        )
+
+    col = get_acag_collection()
+    batch_id = ObjectId(upload.mongo_ref_id)
+    doc_id = ObjectId(record_id)
+
+    dupe = col.find_one(
+        {
+            "_source_batch": batch_id,
+            ACAG_FIELD_YEAR: payload.year,
+            ACAG_FIELD_REGION: upload.country,
+            "_id": {"$ne": doc_id},
+        }
+    )
+    if dupe:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Record already exists for the same country/year.",
+        )
+
+    update_doc = {
+        ACAG_FIELD_YEAR: payload.year,
+        ACAG_FIELD_POP_WEIGHTED: payload.population_weighted_pm25,
+        ACAG_FIELD_GEO_MEAN: payload.geographic_mean_pm25,
+    }
+    result = col.update_one({"_id": doc_id, "_source_batch": batch_id}, {"$set": update_doc})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+    return {"status": "ok"}
+
+
 def delete_upload_with_records(db: Session, account: Account, upload_id: int):
     upload = get_upload_by_id(db, upload_id)
     if not upload:
@@ -1172,7 +1511,12 @@ def delete_upload_with_records(db: Session, account: Account, upload_id: int):
     if account.role == AccountRole.ORG and account.org_id != upload.org_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
 
-    col = get_openaq_collection() if upload.mongo_collection == "OpenAQ" else get_imhe_collection()
+    if upload.mongo_collection == "OpenAQ":
+        col = get_openaq_collection()
+    elif upload.mongo_collection == "ACAG":
+        col = get_acag_collection()
+    else:
+        col = get_imhe_collection()
     try:
         batch_id = ObjectId(upload.mongo_ref_id)
         col.delete_many({"_source_batch": batch_id})

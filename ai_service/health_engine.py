@@ -21,6 +21,8 @@ IER_PARAMS = {
 }
 
 TMREL = 5.0
+MEASURE_DEATHS = "Deaths"
+MEASURE_DALYS = "DALYs (Disability-Adjusted Life Years)"
 
 AGE_VULNERABILITY = {
     'children': {'label': 'Children (0-14)', 'range': range(0, 15), 'multiplier': 1.3},
@@ -119,40 +121,71 @@ class HealthRiskEngine:
 
         return records if records else None
 
-    def calculate(self, country: str, pm25_level: float, target_year: int):
-        """Calculate health risk with age stratification and CIs."""
-        result = {
+    def _init_result(self, country: str, pm25_level: float, target_year: int, metric: str) -> dict:
+        return {
             'country': country,
             'target_year': target_year,
             'pm25_level': pm25_level,
+            'metric': metric,
             'excess_exposure': round(max(0, pm25_level - TMREL), 2),
             'tmrel': TMREL,
             'aqi_category': self._aqi_category(pm25_level),
-            'total_attributed_deaths': 0,
+            'total_attributed': 0,
             'total_ci_lower': 0,
             'total_ci_upper': 0,
             'diseases': [],
             'age_groups': [],
         }
 
-        # Try age-stratified calculation from raw IHME
+    def _with_legacy_death_keys(self, result: dict) -> dict:
+        """Preserve backward-compatible keys for death endpoints."""
+        out = dict(result)
+        out['total_attributed_deaths'] = out.get('total_attributed', 0)
+        diseases = []
+        for d in out.get('diseases', []):
+            dd = dict(d)
+            dd['attributed_deaths'] = dd.get('attributed', 0)
+            dd['baseline_deaths'] = dd.get('baseline', 0)
+            diseases.append(dd)
+        out['diseases'] = diseases
+        age_groups = []
+        for a in out.get('age_groups', []):
+            aa = dict(a)
+            aa['attributed_deaths'] = aa.get('attributed', 0)
+            age_groups.append(aa)
+        out['age_groups'] = age_groups
+        return out
+
+    def calculate(self, country: str, pm25_level: float, target_year: int):
+        """Calculate attributable DEATHS with age stratification and CIs."""
+        result = self._calculate_metric(country, pm25_level, target_year, MEASURE_DEATHS)
+        return self._with_legacy_death_keys(result)
+
+    def calculate_dalys(self, country: str, pm25_level: float, target_year: int):
+        """Calculate attributable DALYs with age stratification and CIs."""
+        result = self._calculate_metric(country, pm25_level, target_year, MEASURE_DALYS)
+        out = dict(result)
+        out['total_attributed_dalys'] = out.get('total_attributed', 0)
+        return out
+
+    def _calculate_metric(self, country: str, pm25_level: float, target_year: int, measure_name: str):
+        metric = "deaths" if measure_name == MEASURE_DEATHS else "dalys"
+        result = self._init_result(country, pm25_level, target_year, metric)
+
         raw_records = self._get_raw_ihme_records(country)
-
         if raw_records:
-            result = self._calc_age_stratified(result, raw_records, pm25_level, target_year)
+            result = self._calc_age_stratified(result, raw_records, pm25_level, target_year, measure_name)
         else:
-            # Fallback to aggregated baselines
-            result = self._calc_aggregated(result, country, pm25_level, target_year)
-
+            result = self._calc_aggregated(result, country, pm25_level, target_year, measure_name)
         return result
 
-    def _calc_age_stratified(self, result, records, pm25, target_year):
-        """Full age-stratified calculation."""
+    def _calc_age_stratified(self, result, records, pm25, target_year, measure_name):
+        """Full age-stratified calculation for the selected measure."""
         available_years = sorted(set(r['year'] for r in records))
         closest = min(available_years, key=lambda y: abs(y - target_year))
 
         year_records = [r for r in records
-                        if r['year'] == closest and r.get('measure_name') == 'Deaths']
+                        if r['year'] == closest and r.get('measure_name') == measure_name]
 
         age_totals = {}
         disease_totals = {}
@@ -180,10 +213,10 @@ class HealthRiskEngine:
             if age_group not in age_totals:
                 age_totals[age_group] = {
                     'label': AGE_VULNERABILITY[age_group]['label'],
-                    'deaths': 0, 'upper': 0, 'lower': 0,
+                    'attributed': 0, 'upper': 0, 'lower': 0,
                     'vulnerability': vuln
                 }
-            age_totals[age_group]['deaths'] += attr
+            age_totals[age_group]['attributed'] += attr
             age_totals[age_group]['upper'] += attr_upper
             age_totals[age_group]['lower'] += attr_lower
 
@@ -207,86 +240,129 @@ class HealthRiskEngine:
             result['diseases'].append({
                 'disease': d['disease'],
                 'category': d['category'],
-                'attributed_deaths': round(d['attributed'], 1),
+                'attributed': round(d['attributed'], 1),
                 'ci_lower': round(d['lower'], 1),
                 'ci_upper': round(d['upper'], 1),
-                'baseline_deaths': round(d['baseline'], 1),
+                'baseline': round(d['baseline'], 1),
                 'relative_risk': d['rr'],
                 'attributable_fraction': d['af'],
             })
 
-        # Build age group list
-        total = sum(a['deaths'] for a in age_totals.values())
-        sorted_ages = sorted(age_totals.values(), key=lambda x: -x['deaths'])
+        total = sum(a['attributed'] for a in age_totals.values())
+        sorted_ages = sorted(age_totals.values(), key=lambda x: -x['attributed'])
         for a in sorted_ages:
-            pct = (a['deaths'] / total * 100) if total > 0 else 0
+            pct = (a['attributed'] / total * 100) if total > 0 else 0
             result['age_groups'].append({
                 'age_group': a['label'],
-                'attributed_deaths': round(a['deaths'], 1),
+                'attributed': round(a['attributed'], 1),
                 'ci_lower': round(a['lower'], 1),
                 'ci_upper': round(a['upper'], 1),
                 'percentage': round(pct, 1),
                 'vulnerability_multiplier': a['vulnerability'],
             })
 
-        result['total_attributed_deaths'] = round(total, 0)
+        result['total_attributed'] = round(total, 0)
         result['total_ci_lower'] = round(sum(a['lower'] for a in age_totals.values()), 0)
         result['total_ci_upper'] = round(sum(a['upper'] for a in age_totals.values()), 0)
-        result['data_note'] = f'Age-stratified (IHME baseline year: {closest})'
+        result['data_note'] = f'Age-stratified {result["metric"]} (IHME baseline year: {closest})'
 
         return result
 
-    def _calc_aggregated(self, result, country, pm25, target_year):
-        """Fallback: use aggregated baselines."""
+    def _select_aggregated_baseline(self, country: str, target_year: int, measure_name: str):
+        """Get aggregated country/year baseline for selected measure."""
         norm = _normalize_country(country)
-        baseline = self.baselines.get(country, {}).get(str(target_year))
-        if not baseline:
-            baseline = self.baselines.get(norm, {}).get(str(target_year))
-        if not baseline:
-            search_names = {country.lower(), norm.lower()}
-            for c in self.baselines:
-                c_lower = c.lower()
-                if any(s in c_lower or c_lower in s for s in search_names):
-                    baseline = self.baselines[c].get(str(target_year))
-                    if baseline:
-                        break
+        search_names = {country.lower(), norm.lower()}
+        candidate_countries = []
 
-        # Fallback: try nearest available year
-        if not baseline:
-            for c_key in [country, norm]:
-                year_data = self.baselines.get(c_key, {})
-                if year_data:
-                    available_years = sorted(year_data.keys(), key=lambda y: abs(int(y) - target_year))
-                    if available_years:
-                        baseline = year_data[available_years[0]]
-                        break
+        for c_key in [country, norm]:
+            if c_key in self.baselines:
+                candidate_countries.append(c_key)
+        for c in self.baselines:
+            c_lower = c.lower()
+            if any(s in c_lower or c_lower in s for s in search_names):
+                if c not in candidate_countries:
+                    candidate_countries.append(c)
 
+        def _safe_year_int(y: str) -> int:
+            try:
+                return int(y)
+            except Exception:
+                return target_year
+
+        for c_key in candidate_countries:
+            country_data = self.baselines.get(c_key, {})
+            if not isinstance(country_data, dict):
+                continue
+
+            # Preferred: migration-safe extended map.
+            measures_map = country_data.get("_measures", {})
+            if isinstance(measures_map, dict):
+                year_map = measures_map.get(str(target_year))
+                if isinstance(year_map, dict) and isinstance(year_map.get(measure_name), dict):
+                    return year_map.get(measure_name)
+                if measures_map:
+                    nearest_years = sorted(measures_map.keys(), key=lambda y: abs(_safe_year_int(y) - target_year))
+                    for y in nearest_years:
+                        ym = measures_map.get(y, {})
+                        if isinstance(ym, dict) and isinstance(ym.get(measure_name), dict):
+                            return ym.get(measure_name)
+
+            # Legacy year map (death-only) or older nested-measure format.
+            year_map = country_data.get(str(target_year))
+            if isinstance(year_map, dict):
+                if all(isinstance(v, (int, float)) for v in year_map.values()):
+                    if measure_name == MEASURE_DEATHS:
+                        return year_map
+                else:
+                    candidate = year_map.get(measure_name)
+                    if isinstance(candidate, dict):
+                        return candidate
+
+            years = [k for k in country_data.keys() if k != "_measures"]
+            nearest_years = sorted(years, key=lambda y: abs(_safe_year_int(y) - target_year))
+            for y in nearest_years:
+                yr_data = country_data.get(y)
+                if not isinstance(yr_data, dict):
+                    continue
+                if all(isinstance(v, (int, float)) for v in yr_data.values()):
+                    if measure_name == MEASURE_DEATHS:
+                        return yr_data
+                else:
+                    candidate = yr_data.get(measure_name)
+                    if isinstance(candidate, dict):
+                        return candidate
+
+        return None
+
+    def _calc_aggregated(self, result, country, pm25, target_year, measure_name):
+        """Fallback: use aggregated baselines for the selected measure."""
+        baseline = self._select_aggregated_baseline(country, target_year, measure_name)
         if not baseline:
-            result['data_note'] = 'No health baseline data available'
+            result['data_note'] = f'No {result["metric"]} baseline data available'
             return result
 
         total = 0
-        for disease, deaths in baseline.items():
+        for disease, base_value in baseline.items():
             rr, af = self._calc_rr(pm25, disease)
             if af > 0:
-                attr = deaths * af
+                attr = base_value * af
                 total += attr
                 result['diseases'].append({
                     'disease': disease,
                     'category': IER_PARAMS.get(disease, {}).get('category', 'Other'),
-                    'attributed_deaths': round(attr, 1),
+                    'attributed': round(attr, 1),
                     'ci_lower': round(attr * 0.6, 1),
                     'ci_upper': round(attr * 1.5, 1),
-                    'baseline_deaths': round(deaths, 1),
+                    'baseline': round(base_value, 1),
                     'relative_risk': rr,
                     'attributable_fraction': af,
                 })
 
-        result['diseases'].sort(key=lambda x: -x['attributed_deaths'])
-        result['total_attributed_deaths'] = round(total, 0)
+        result['diseases'].sort(key=lambda x: -x['attributed'])
+        result['total_attributed'] = round(total, 0)
         result['total_ci_lower'] = round(total * 0.6, 0)
         result['total_ci_upper'] = round(total * 1.5, 0)
-        result['data_note'] = 'Aggregated baseline (no age stratification)'
+        result['data_note'] = f'Aggregated {result["metric"]} baseline (no age stratification)'
 
         return result
 

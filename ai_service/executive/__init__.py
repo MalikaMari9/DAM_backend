@@ -13,6 +13,7 @@ from .predict_pm25 import (
 from .predict_health import (
     predict_deaths,
     predict_attributable_deaths,
+    predict_attributable_dalys,
     predict_death_rate,
     top_diseases,
     compare_health,

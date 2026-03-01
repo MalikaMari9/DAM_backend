@@ -13,6 +13,7 @@ from app.routes.pollution_who import router as pollution_who_router
 from app.routes.pollution_acag import router as pollution_acag_router
 from app.routes.announcements import router as announcements_router
 from app.routes.ai_proxy import router as ai_proxy_router
+from app.routes.live_air import router as live_air_router
 
 app = FastAPI()
 
@@ -43,6 +44,7 @@ app.include_router(pollution_who_router)
 app.include_router(pollution_acag_router)
 app.include_router(announcements_router)
 app.include_router(ai_proxy_router)
+app.include_router(live_air_router)
 
 
 

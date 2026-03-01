@@ -37,6 +37,14 @@ _PRED_METRIC_FIELDS = {
     "pop_weighted": PRED_FIELD_POP_WEIGHTED,
     "geo_mean": PRED_FIELD_GEO_MEAN,
 }
+_HIDDEN_LIST_COUNTRY_NAMES = [
+    "Western Europe",
+    "Cabo Verde",
+    "Cape Verde",
+    "Micronesia",
+    "Micronesia (Federated States of)",
+    "Sao Tome and Principe",
+]
 
 SourceKind = Literal["raw", "pred"]
 
@@ -173,6 +181,94 @@ def _year_value_expr(kind: SourceKind):
     return _convert_int_expr(f"${PRED_FIELD_YEAR}")
 
 
+def _country_key_expr(kind: SourceKind):
+    if kind == "raw":
+        source_expr = _region_value_expr("raw")
+    else:
+        source_expr = {
+            "$ifNull": [
+                f"${PRED_FIELD_SOURCE_REGION}",
+                {"$ifNull": [f"${PRED_FIELD_REGION}", f"${PRED_FIELD_COUNTRY_KEY}"]},
+            ]
+        }
+    return {"$toLower": {"$trim": {"input": {"$ifNull": [source_expr, ""]}}}}
+
+
+def _pred_year_filter(year_from: int | None = None, year_to: int | None = None):
+    effective_from = PRED_START_YEAR if year_from is None else max(int(year_from), PRED_START_YEAR)
+    if year_to is not None and effective_from > int(year_to):
+        return None
+    year_filter: dict[str, int] = {"$gte": effective_from}
+    if year_to is not None:
+        year_filter["$lte"] = int(year_to)
+    return year_filter
+
+
+def _start_fallback_pipeline(raw_filters: dict[str, Any], pred_filters: dict[str, Any] | None, metric_key: str):
+    raw_col = get_acag_collection()
+    pred_col = get_acag_pred_collection()
+    metric_expr_raw = _metric_value_expr("raw", metric_key)
+    metric_expr_pred = _metric_value_expr("pred", metric_key)
+
+    pipeline: list[dict[str, Any]] = [
+        {"$match": raw_filters},
+        {
+            "$addFields": {
+                "metric_value": metric_expr_raw,
+                "population_value": {"$ifNull": [_population_value_expr("raw"), 0]},
+                "region_value": _region_value_expr("raw"),
+                "country_key_value": _country_key_expr("raw"),
+                "year_value": _year_value_expr("raw"),
+                "pop_weighted_value": _metric_value_expr("raw", "pop_weighted"),
+                "geo_mean_value": _metric_value_expr("raw", "geo_mean"),
+                "pop_coverage_value": _convert_expr(f"${FIELD_POP_COVERAGE}"),
+                "geo_coverage_value": _convert_expr(f"${FIELD_GEO_COVERAGE}"),
+                "population_total_value": _convert_expr(f"${FIELD_POP_TOTAL}"),
+                "__source_rank": 0,
+            }
+        },
+        {"$match": {"metric_value": {"$type": "number"}, "country_key_value": {"$type": "string"}, "year_value": {"$type": "number"}}},
+    ]
+
+    if pred_filters is not None:
+        pred_pipeline: list[dict[str, Any]] = [
+            {"$match": pred_filters},
+            {
+                "$addFields": {
+                    "metric_value": metric_expr_pred,
+                    "population_value": {"$ifNull": [_population_value_expr("pred"), 0]},
+                    "region_value": _region_value_expr("pred"),
+                    "country_key_value": _country_key_expr("pred"),
+                    "year_value": _year_value_expr("pred"),
+                    "pop_weighted_value": _convert_expr(f"${PRED_FIELD_POP_WEIGHTED}"),
+                    "geo_mean_value": _convert_expr(f"${PRED_FIELD_GEO_MEAN}"),
+                    "pop_coverage_value": _convert_expr(f"${PRED_FIELD_POP_COVERAGE}"),
+                    "geo_coverage_value": _convert_expr(f"${PRED_FIELD_GEO_COVERAGE}"),
+                    "population_total_value": _convert_expr(f"${PRED_FIELD_POP_TOTAL}"),
+                    "__source_rank": 1,
+                }
+            },
+            {"$match": {"metric_value": {"$type": "number"}, "country_key_value": {"$type": "string"}, "year_value": {"$type": "number"}}},
+        ]
+        pipeline.append(
+            {
+                "$unionWith": {
+                    "coll": pred_col.name,
+                    "pipeline": pred_pipeline,
+                }
+            }
+        )
+
+    pipeline.extend(
+        [
+            {"$sort": {"country_key_value": 1, "year_value": 1, "__source_rank": 1}},
+            {"$group": {"_id": {"country": "$country_key_value", "year": "$year_value"}, "doc": {"$first": "$$ROOT"}}},
+            {"$replaceRoot": {"newRoot": "$doc"}},
+        ]
+    )
+    return raw_col, pipeline
+
+
 def _list_projection(kind: SourceKind) -> dict[str, Any]:
     if kind == "raw":
         return {
@@ -235,15 +331,29 @@ def _build_filters(params: dict[str, Any], kind: SourceKind) -> dict[str, Any]:
     return filters
 
 
+def _with_hidden_list_exclusions(filters: dict[str, Any], kind: SourceKind) -> dict[str, Any]:
+    if kind == "raw":
+        exclusion = {"$nor": _build_country_or(_HIDDEN_LIST_COUNTRY_NAMES, FIELD_REGION)}
+    else:
+        exclusion = {"$nor": _pred_country_clauses(_HIDDEN_LIST_COUNTRY_NAMES)}
+
+    if not filters:
+        return exclusion
+    return {"$and": [filters, exclusion]}
+
+
 def _list_from_collection(
     kind: SourceKind,
     params: dict[str, Any],
     limit: int,
     offset: int,
     metric_key: str,
+    exclude_hidden: bool = False,
 ):
     col = _get_collection(kind)
     filters = _build_filters(params, kind)
+    if exclude_hidden:
+        filters = _with_hidden_list_exclusions(filters, kind)
     metric_expr = _metric_value_expr(kind, metric_key)
 
     pipeline = [
@@ -271,11 +381,42 @@ def _list_from_collection(
 def list_acag(params: dict[str, Any], limit: int, offset: int, metric: str):
     metric_key = _metric_key(metric)
     year = params.get("year")
-    if year is not None:
-        kind = _kind_for_year(int(year))
-    else:
-        kind = "raw"
-    return _list_from_collection(kind, params, limit=limit, offset=offset, metric_key=metric_key)
+    if year is None or int(year) < PRED_START_YEAR:
+        return _list_from_collection(
+            "raw",
+            params,
+            limit=limit,
+            offset=offset,
+            metric_key=metric_key,
+            exclude_hidden=True,
+        )
+
+    raw_filters = _with_hidden_list_exclusions(_build_filters(params, "raw"), "raw")
+    pred_filters = _with_hidden_list_exclusions(_build_filters(params, "pred"), "pred")
+    col, pipeline = _start_fallback_pipeline(raw_filters, pred_filters, metric_key)
+    items_pipeline = [
+        *pipeline,
+        {"$sort": {"metric_value": -1}},
+        {"$skip": int(offset)},
+        {"$limit": int(limit)},
+        {
+            "$project": {
+                "_id": 0,
+                FIELD_REGION: "$region_value",
+                FIELD_YEAR: "$year_value",
+                FIELD_POP_WEIGHTED: "$pop_weighted_value",
+                FIELD_GEO_MEAN: "$geo_mean_value",
+                FIELD_POP_COVERAGE: "$pop_coverage_value",
+                FIELD_GEO_COVERAGE: "$geo_coverage_value",
+                FIELD_POP_TOTAL: "$population_total_value",
+                "metric_value": 1,
+            }
+        },
+    ]
+    items = list(col.aggregate(items_pipeline))
+    count_res = list(col.aggregate([*pipeline, {"$count": "total"}]))
+    total = int(count_res[0]["total"]) if count_res else 0
+    return total, items
 
 
 def _country_summary_from_collection(kind: SourceKind, params: dict[str, Any], metric_key: str):
@@ -326,14 +467,77 @@ def _country_summary_from_collection(kind: SourceKind, params: dict[str, Any], m
     return list(col.aggregate(pipeline))
 
 
+def _country_year_totals_from_collection(
+    kind: SourceKind,
+    year_from: int,
+    year_to: int,
+    metric_key: str,
+    country_name: str | None,
+):
+    col = _get_collection(kind)
+    params = {"country_name": country_name} if country_name else {}
+    match = _build_filters(params, kind)
+    year_field = FIELD_YEAR if kind == "raw" else PRED_FIELD_YEAR
+    match[year_field] = {"$gte": int(year_from), "$lte": int(year_to)}
+
+    metric_expr = _metric_value_expr(kind, metric_key)
+    pop_expr = _population_value_expr(kind)
+    year_expr = _year_value_expr(kind)
+    region_expr = _region_value_expr(kind)
+
+    pipeline = [
+        {"$match": match},
+        {
+            "$addFields": {
+                "metric_value": metric_expr,
+                "population_value": {"$ifNull": [pop_expr, 0]},
+                "year_value": year_expr,
+                "region_value": region_expr,
+            }
+        },
+        {
+            "$match": {
+                "metric_value": {"$type": "number"},
+                "year_value": {"$type": "number"},
+                "region_value": {"$type": "string"},
+            }
+        },
+        {
+            "$group": {
+                "_id": {"country": "$region_value", "year": "$year_value"},
+                "numerator": {"$sum": {"$multiply": ["$metric_value", "$population_value"]}},
+                "denominator": {"$sum": "$population_value"},
+                "avg_value": {"$avg": "$metric_value"},
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "country": "$_id.country",
+                "year": "$_id.year",
+                "numerator": 1,
+                "denominator": 1,
+                "avg_value": 1,
+            }
+        },
+    ]
+    return list(col.aggregate(pipeline))
+
+
 def country_summary(params: dict[str, Any], metric: str):
     metric_key = _metric_key(metric)
     year = params.get("year")
-    if year is not None:
-        kind = _kind_for_year(int(year))
-    else:
-        kind = "raw"
-    return _country_summary_from_collection(kind, params, metric_key=metric_key)
+    if year is None or int(year) < PRED_START_YEAR:
+        return _country_summary_from_collection("raw", params, metric_key=metric_key)
+
+    raw_rows = _country_summary_from_collection("raw", params, metric_key=metric_key)
+    pred_rows = _country_summary_from_collection("pred", params, metric_key=metric_key)
+    merged = {row["country"]: row for row in raw_rows if row.get("country")}
+    for row in pred_rows:
+        country = row.get("country")
+        if country and country not in merged:
+            merged[country] = row
+    return [merged[key] for key in sorted(merged)]
 
 
 def _trend_segment(
@@ -398,23 +602,24 @@ def trend_by_year(
     metric_key = _metric_key(metric)
     start = int(min(year_from, year_to))
     end = int(max(year_from, year_to))
-
-    by_year: dict[int, dict[str, Any]] = {}
-
-    raw_end = min(end, PRED_START_YEAR - 1)
-    if start <= raw_end:
-        raw_rows = _trend_segment(
+    if end < PRED_START_YEAR:
+        return _trend_segment(
             "raw",
             year_from=start,
-            year_to=raw_end,
+            year_to=end,
             metric_key=metric_key,
             country_name=country_name,
         )
-        for row in raw_rows:
-            by_year[int(row["year"])] = row
 
     pred_start = max(start, PRED_START_YEAR)
-    if pred_start <= end:
+    if country_name:
+        raw_rows = _trend_segment(
+            "raw",
+            year_from=start,
+            year_to=end,
+            metric_key=metric_key,
+            country_name=country_name,
+        )
         pred_rows = _trend_segment(
             "pred",
             year_from=pred_start,
@@ -422,7 +627,66 @@ def trend_by_year(
             metric_key=metric_key,
             country_name=country_name,
         )
+        merged = {int(row["year"]): row for row in raw_rows if row.get("year") is not None}
         for row in pred_rows:
-            by_year[int(row["year"])] = row
+            year = row.get("year")
+            if year is not None and int(year) not in merged:
+                merged[int(year)] = row
+        return [merged[key] for key in sorted(merged)]
 
-    return [by_year[y] for y in sorted(by_year)]
+    raw_country_year = _country_year_totals_from_collection(
+        "raw",
+        year_from=start,
+        year_to=end,
+        metric_key=metric_key,
+        country_name=None,
+    )
+    pred_country_year = _country_year_totals_from_collection(
+        "pred",
+        year_from=pred_start,
+        year_to=end,
+        metric_key=metric_key,
+        country_name=None,
+    )
+    merged_country_year: dict[tuple[str, int], dict[str, float]] = {}
+    for row in raw_country_year:
+        country = row.get("country")
+        year = row.get("year")
+        if country and year is not None:
+            merged_country_year[(country, int(year))] = {
+                "numerator": float(row.get("numerator") or 0),
+                "denominator": float(row.get("denominator") or 0),
+                "avg_value": float(row.get("avg_value") or 0),
+            }
+    for row in pred_country_year:
+        country = row.get("country")
+        year = row.get("year")
+        if country and year is not None:
+            key = (country, int(year))
+            if key not in merged_country_year:
+                merged_country_year[key] = {
+                    "numerator": float(row.get("numerator") or 0),
+                    "denominator": float(row.get("denominator") or 0),
+                    "avg_value": float(row.get("avg_value") or 0),
+                }
+
+    year_acc: dict[int, dict[str, float]] = {}
+    for (_country, year), stats in merged_country_year.items():
+        bucket = year_acc.setdefault(year, {"numerator": 0.0, "denominator": 0.0, "avg_total": 0.0, "avg_count": 0.0})
+        bucket["numerator"] += stats["numerator"]
+        bucket["denominator"] += stats["denominator"]
+        if stats["denominator"] <= 0:
+            bucket["avg_total"] += stats["avg_value"]
+            bucket["avg_count"] += 1.0
+
+    rows = []
+    for year in sorted(year_acc):
+        bucket = year_acc[year]
+        if bucket["denominator"] > 0:
+            value = bucket["numerator"] / bucket["denominator"]
+        elif bucket["avg_count"] > 0:
+            value = bucket["avg_total"] / bucket["avg_count"]
+        else:
+            value = 0.0
+        rows.append({"year": year, "value": value})
+    return rows
